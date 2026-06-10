@@ -1,0 +1,76 @@
+# DATABASE — Origen y descripción de los datos
+
+## De dónde salen los datos
+
+Los datos provienen del dataset público de Kaggle **"International football
+results from 1872 to 2026"**, del usuario **martj42**.
+
+- Plataforma: Kaggle
+- Identificador (slug): `martj42/international-football-results-from-1872-to-2017`
+- Contenido: resultados de partidos internacionales de selecciones masculinas. Incluye amistosos, clasificatorias, Mundiales, Eurocopa, Copa América y varios más no solo
+  partidos de Mundial.
+
+La extracción **no está automatizada**: los archivos CSV se descargan
+manualmente y se colocan en la carpeta `datasets/`.
+
+## Archivos usados
+
+### results.csv (principal)
+
+Una fila por partido. Es la base del proyecto y de la variable objetivo.
+
+| Columna     | Descripción                                              |
+|-------------|----------------------------------------------------------|
+| date        | Fecha del partido                                        |
+| home_team   | Selección local                                          |
+| away_team   | Selección visitante                                      |
+| home_score  | Goles del local                                          |
+| away_score  | Goles del visitante                                      |
+| tournament  | Tipo de torneo (Friendly, FIFA World Cup, etc.)          |
+| city        | Ciudad donde se jugó                                     |
+| country     | País donde se jugó                                       |
+| neutral     | Booleano: si se jugó en cancha neutral                   |
+
+### goalscorers.csv (complementario)
+
+Detalle de goleadores por partido. No se usa en el dataset final actual; queda
+disponible para enriquecer el modelo más adelante.
+
+| Columna     | Descripción                                |
+|-------------|--------------------------------------------|
+| date        | Fecha del partido                          |
+| home_team   | Selección local                            |
+| away_team   | Selección visitante                        |
+| team        | Selección que anotó el gol                 |
+| scorer      | Nombre del goleador                        |
+| minute      | Minuto del gol (puede tener nulos)         |
+| own_goal    | Si fue gol en propia puerta                |
+| penalty     | Si fue de penal                            |
+
+### shootouts.csv (complementario)
+
+Tandas de penaltis. Aplica solo a partidos de eliminación empatados; no se usa en
+el dataset final actual.
+
+| Columna     | Descripción                                |
+|-------------|--------------------------------------------|
+| date        | Fecha del partido                          |
+| home_team   | Selección local                            |
+| away_team   | Selección visitante                        |
+| winner      | Selección que ganó la tanda                |
+
+
+## Decisiones de alcance
+
+- **Desde el año 2000:** se descartan los partidos anteriores para reducir el
+  sesgo de épocas muy distintas del fútbol y trabajar con datos más completos.
+- **Nombres actuales:** se unifican nombres de selecciones que cambiaron después
+  de 2000 (ver `MAPA_NOMBRES` en `utils.py`); por eso no se usa `former_names`.
+- **Solo `results`:** el dataset final se construye solo a partir de `results`.
+  `goalscorers` y `shootouts` se reservan como posibles mejoras futuras.
+
+## Salida generada
+
+`datasets/dataset_final.csv`: dataset transformado, con la variable objetivo y
+las variables de forma reciente, listo para entrenar el modelo de pronóstico
+(ver columnas en `WORKFLOWS.md`).

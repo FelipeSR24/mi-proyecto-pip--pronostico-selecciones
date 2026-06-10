@@ -1,0 +1,10 @@
+# Entorno virtual
+venv/
+.venv/
+
+# Variables de entorno (nunca subir secretos)
+.env
+
+# Datos (suelen ser pesados; no se versionan)
+datasets/*.csv
+
