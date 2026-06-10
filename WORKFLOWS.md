@@ -1,37 +1,64 @@
 # WORKFLOWS — Descripción del funcionamiento
 
 Este documento explica, paso a paso, qué hace el código del proyecto. El flujo
-vive en `main.py` y se apoya en funciones de `utils.py`.
+vive en `main.py` (función `main()`, con guarda `if __name__ == "__main__"`)
+y se apoya en funciones de `utils.py`.
 
-## Sección 1 — EDA inicial
+## Vista general del flujo
+
+```
+datasets/results.csv ─┐
+datasets/goalscorers.csv ─┼─► [1. EDA inicial] ─► results validado
+datasets/shootouts.csv ─┘            │
+                                     ▼
+                          [2. Transformación]
+              filtrar ≥ 2000 ► quitar duplicados ► unificar nombres
+                     ► crear target ► features de forma (shift+rolling)
+                                     │
+                                     ▼
+                      output/dataset_final.csv
+                                     │
+                                     ▼
+                          [3. EDA posterior]
+              estadísticos + distribución + 4 figuras PNG
+                        (output/figuras/*.png)
+```
+
+## Sección 1 — EDA inicial (`eda_inicial()`)
 
 Objetivo: conocer los datos crudos antes de transformarlos.
 
-- **Carga de archivos en orden.** Se leen `results.csv`, `goalscorers.csv` y
-  `shootouts.csv` con `utils.cargar_dataset()`, que usa `pandas.read_csv`.
+- **Carga con validación.** Se leen `results.csv`, `goalscorers.csv` y
+  `shootouts.csv` con `utils.cargar_dataset()`. Si falta un archivo, el
+  programa termina con un mensaje claro (no un traceback). Además,
+  `utils.validar_columnas()` verifica que `results` tenga las columnas
+  esperadas.
 - **Estructura de cada dataset.** `utils.mostrar_estructura()` imprime la forma
   (`shape`), el `info()` (tipos y no-nulos) y los nulos por columna.
+- **Duplicados.** `utils.contar_duplicados()` cuenta filas repetidas exactas
+  en cada dataset (evidencia de limpieza).
 - **Proporción de resultados.** `utils.proporcion_resultados()` compara
-  `home_score` y `away_score` para contar cuántos partidos gana el local, cuántos
-  terminan en empate y cuántos gana el visitante, con su porcentaje.
+  `home_score` y `away_score` para contar cuántos partidos gana el local,
+  cuántos terminan en empate y cuántos gana el visitante, con su porcentaje.
 - **Países únicos.** `utils.paises_unicos()` une las columnas de local y
   visitante y cuenta en cuántos partidos aparece cada selección.
 - **Información adicional.** Rango de fechas, tipos de torneo más frecuentes
   (`tournament`) y distribución de la columna `neutral` (partidos en cancha
   neutral, clave para la ventaja de local).
 
-## Sección 2 — Transformación
+## Sección 2 — Transformación (`transformar()`)
 
 Objetivo: producir un único dataset listo para el modelo.
 
-1. **Filtrado temporal** (`utils.filtrar_desde`): convierte la fecha, descarta
-   partidos sin marcador y conserva solo los jugados desde el año 2000. Ordena
-   por fecha (imprescindible para no usar información del futuro).
+1. **Filtrado temporal y limpieza** (`utils.filtrar_desde`): convierte la
+   fecha, descarta partidos sin marcador, **elimina filas duplicadas exactas**
+   y conserva solo los jugados desde el año 2000 (`START_YEAR`). Ordena por
+   fecha (imprescindible para no usar información del futuro).
 2. **Unificación de nombres** (`utils.unificar_nombres`): reemplaza nombres
-   antiguos por los actuales (p. ej. "Serbia and Montenegro" -> "Serbia") usando
+   antiguos por los actuales (p. ej. "Serbia and Montenegro" → "Serbia") usando
    el diccionario `MAPA_NOMBRES`. Puedes ampliarlo si tu EDA revela más casos.
-3. **Variable objetivo** (`utils.crear_target`): crea la columna `resultado` con
-   tres clases (local / empate / visitante) usando `numpy.select`.
+3. **Variable objetivo** (`utils.crear_target`): crea la columna `resultado`
+   con tres clases (local / empate / visitante) usando `numpy.select`.
 4. **Ingeniería de variables** (`utils.construir_features`): calcula la "forma
    reciente" de cada equipo SIN fuga de información. Para ello:
    - Pasa los partidos a formato largo (una fila por equipo por partido).
@@ -41,9 +68,12 @@ Objetivo: producir un único dataset listo para el modelo.
    - Vuelve a unir esas variables al partido, separadas en local y visitante, y
      añade `dif_forma_pts` (diferencia de forma entre ambos).
    - Descarta las primeras filas de cada equipo (sin historial todavía).
-5. **Guardado**: el resultado se escribe en `datasets/dataset_final.csv`.
+5. **Guardado**: el resultado se escribe en `output/dataset_final.csv`.
+   Ni `output/` ni `datasets/` se versionan (ver `.gitignore`): los CSV
+   crudos son pesados y se descargan de Kaggle, y la salida es regenerable
+   ejecutando `python main.py`.
 
-## Sección 3 — EDA posterior
+## Sección 3 — EDA posterior (`eda_posterior()`)
 
 Objetivo: validar el dataset final.
 
@@ -51,13 +81,26 @@ Objetivo: validar el dataset final.
 - Distribución de la variable objetivo (para detectar desbalanceo de clases).
 - Estadísticos de las variables (`describe()`).
 - Primeras filas (`head()`).
+- **Cuatro gráficos** guardados en `output/figuras/`:
+
+| Figura | Qué muestra | Para qué sirve |
+|---|---|---|
+| `01_distribucion_target.png` | Barras de local/empate/visitante | Detectar desbalance de clases antes de modelar |
+| `02_partidos_por_anio.png` | Partidos por año | Verificar cobertura temporal (caída en 2020 por pandemia, p. ej.) |
+| `03_ventaja_local.png` | Resultado en cancha propia vs. neutral | Evidencia visual de la ventaja de local (cae ~10 pts en cancha neutral) |
+| `04_dif_forma_vs_resultado.png` | Boxplot de `dif_forma_pts` por clase | Validar que la feature principal discrimina entre clases |
 
 ## Prevención de fuga de información (data leakage)
 
 Es el punto metodológico más importante. Todas las variables de forma reciente
-se calculan únicamente con partidos anteriores a la fecha de cada partido. Si no
-se usara `shift(1)`, el modelo "vería" el resultado que intenta predecir y daría
-métricas engañosamente altas.
+se calculan únicamente con partidos anteriores a la fecha de cada partido. Si
+no se usara `shift(1)`, el modelo "vería" el resultado que intenta predecir y
+daría métricas engañosamente altas.
+
+La garantía se puede verificar manualmente: tomando cualquier equipo y
+ordenando sus partidos por fecha, la columna `*_forma_*` de un partido
+coincide con el promedio de sus `VENTANA_FORMA` partidos **anteriores**,
+nunca incluye el propio partido.
 
 ## Columnas del dataset final
 
