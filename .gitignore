@@ -1,10 +1,25 @@
-# Entorno virtual
+# --- Entorno virtual ---
 venv/
 .venv/
+pyvenv.cfg
 
-# Variables de entorno (nunca subir secretos)
+# --- Artefactos de Python ---
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# --- Variables de entorno (nunca subir secretos) ---
 .env
 
-# Datos (suelen ser pesados; no se versionan)
-datasets/*.csv
+# --- Carpetas de datos generadas/colocadas en ejecucion (no se versionan) ---
+# datasets/: CSV crudos descargados de Kaggle (pesados y regenerables, ver DATABASE.md)
+# output/:   dataset final y figuras, regenerables ejecutando 'python main.py'
+datasets/
+output/
 
+# --- Archivos del sistema operativo / editores ---
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
