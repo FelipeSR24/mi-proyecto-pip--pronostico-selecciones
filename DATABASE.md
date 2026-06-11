@@ -7,11 +7,18 @@ results from 1872 to 2026"**, del usuario **martj42**.
 
 - Plataforma: Kaggle
 - Identificador (slug): `martj42/international-football-results-from-1872-to-2017`
-- Contenido: resultados de partidos internacionales de selecciones masculinas. Incluye amistosos, clasificatorias, Mundiales, Eurocopa, Copa América y varios más no solo
-  partidos de Mundial.
+- URL: <https://www.kaggle.com/datasets/martj42/international-football-results-from-1872-to-2017>
+- Licencia: la indicada en la página del dataset (CC0 / dominio público al
+  momento de la consulta; verificar en Kaggle antes de cualquier uso no
+  académico).
+- Contenido: resultados de partidos internacionales de selecciones masculinas.
+  Incluye amistosos, clasificatorias, Mundiales, Eurocopa, Copa América y
+  varios torneos más, no solo partidos de Mundial.
 
 La extracción **no está automatizada**: los archivos CSV se descargan
-manualmente y se colocan en la carpeta `datasets/`.
+manualmente desde Kaggle y se colocan en la carpeta `datasets/`. Estos CSV
+crudos **no se versionan** en el repositorio (ver `.gitignore`) por su tamaño
+y porque son regenerables desde la fuente.
 
 ## Archivos usados
 
@@ -49,28 +56,47 @@ disponible para enriquecer el modelo más adelante.
 
 ### shootouts.csv (complementario)
 
-Tandas de penaltis. Aplica solo a partidos de eliminación empatados; no se usa en
-el dataset final actual.
+Tandas de penaltis. Aplica solo a partidos de eliminación empatados; no se usa
+en el dataset final actual.
 
-| Columna     | Descripción                                |
-|-------------|--------------------------------------------|
-| date        | Fecha del partido                          |
-| home_team   | Selección local                            |
-| away_team   | Selección visitante                        |
-| winner      | Selección que ganó la tanda                |
+| Columna       | Descripción                                              |
+|---------------|----------------------------------------------------------|
+| date          | Fecha del partido                                        |
+| home_team     | Selección local                                          |
+| away_team     | Selección visitante                                      |
+| winner        | Selección que ganó la tanda                              |
+| first_shooter | Selección que pateó primero (tiene muchos nulos)         |
 
+### former_names.csv (complementario, no usado)
+
+Mapa histórico de nombres de selecciones provisto por el propio dataset de
+Kaggle. No lo usa el pipeline: la unificación de nombres se hace con el
+diccionario `MAPA_NOMBRES` de `utils.py`, que cubre solo los casos que
+aparecen desde el año 2000 (alcance del proyecto).
+
+| Columna    | Descripción                                  |
+|------------|----------------------------------------------|
+| current    | Nombre actual de la selección                |
+| former     | Nombre anterior                              |
+| start_date | Inicio de vigencia del nombre anterior       |
+| end_date   | Fin de vigencia del nombre anterior          |
 
 ## Decisiones de alcance
 
 - **Desde el año 2000:** se descartan los partidos anteriores para reducir el
   sesgo de épocas muy distintas del fútbol y trabajar con datos más completos.
-- **Nombres actuales:** se unifican nombres de selecciones que cambiaron después
-  de 2000 (ver `MAPA_NOMBRES` en `utils.py`); por eso no se usa `former_names`.
+- **Nombres actuales:** se unifican nombres de selecciones que cambiaron y que
+  pueden aparecer desde 2000 (ver `MAPA_NOMBRES` en `utils.py`); por eso no se
+  usa `former_names.csv`. La fusión "Serbia and Montenegro" → "Serbia" es una
+  decisión de modelado: se asume continuidad deportiva de la selección para no
+  fragmentar su historial reciente.
 - **Solo `results`:** el dataset final se construye solo a partir de `results`.
   `goalscorers` y `shootouts` se reservan como posibles mejoras futuras.
 
 ## Salida generada
 
-`datasets/dataset_final.csv`: dataset transformado, con la variable objetivo y
+`output/dataset_final.csv`: dataset transformado, con la variable objetivo y
 las variables de forma reciente, listo para entrenar el modelo de pronóstico
-(ver columnas en `WORKFLOWS.md`).
+(ver columnas y diagrama de flujo en `WORKFLOWS.md`). Las figuras del EDA se
+guardan en `output/figuras/`. La carpeta `output/` se genera automáticamente
+al ejecutar `python main.py` y no se versiona (es regenerable).
