@@ -1,94 +1,129 @@
 """
-main.py
+============================================================================
+main.py  —  GUION PRINCIPAL DEL PROYECTO
+============================================================================
 Proyecto de pronostico de partidos de selecciones (base para el Mundial 2026).
 
-Pipeline en 3 secciones:
-  1. EDA inicial      -> explora los datos crudos
-  2. Transformacion   -> arma un solo dataset listo para el modelo
-  3. EDA posterior    -> revisa el dataset final (incluye graficos en PNG)
+QUE ES ESTE ARCHIVO
+-------------------
+Es el "director de orquesta" del proyecto: el archivo que se ejecuta con
+`python main.py`. No contiene la logica detallada (esa vive en utils.py);
+aqui solo se ordena, paso a paso, QUE se hace y EN QUE ORDEN.
 
-NOTA: este script NO incluye todavia el modelo de pronostico.
-La extraccion de datos NO esta automatizada: tu colocas manualmente los CSV
-en la carpeta 'datasets/' (ver DATABASE.md).
+EL PIPELINE TIENE 3 SECCIONES
+-----------------------------
+  1. EDA inicial    -> exploramos los datos CRUDOS para conocerlos.
+  2. Transformacion -> limpiamos y construimos UN dataset listo para el modelo.
+  3. EDA posterior  -> revisamos el dataset final y generamos graficos.
 
-Configuracion: los parametros se leen de variables de entorno (archivo .env,
-ver .env.example) y, si no existen, se usan los valores por defecto de abajo.
+(EDA = Exploratory Data Analysis = Analisis Exploratorio de Datos.)
+
+NOTA DE ALCANCE: esta entrega llega hasta preparar los datos. El modelo de
+prediccion en si se construira en la siguiente etapa.
+
+LOS DATOS NO SE DESCARGAN SOLOS: hay que colocar manualmente los CSV de Kaggle
+en la carpeta 'datasets/' (ver DATABASE.md para el detalle del origen).
+============================================================================
 """
 
-import os
-import sys
-from pathlib import Path
+# --- Librerias estandar de Python ---
+import os                 # para leer variables de entorno (la configuracion)
+import sys                # para escribir errores en la salida de error estandar
+from pathlib import Path  # para manejar rutas de carpetas de forma segura
 
-import pandas as pd
+# --- Libreria de terceros ---
+import pandas as pd       # la herramienta central para manejar tablas de datos
 
-import utils
+# --- Nuestro propio modulo de funciones auxiliares ---
+import utils              # aqui estan TODAS las funciones que hacen el trabajo
 
-# Carga opcional del archivo .env (si python-dotenv esta instalado).
+# Intentamos cargar el archivo .env (configuracion opcional). Si la libreria
+# python-dotenv no esta instalada, no pasa nada: se usan los valores por defecto.
 try:
     from dotenv import load_dotenv
-    load_dotenv()
+    load_dotenv()  # lee el archivo .env y lo carga como variables de entorno
 except ImportError:
-    pass  # sin dotenv, simplemente se usan los valores por defecto
+    pass  # sin dotenv seguimos con los valores por defecto definidos abajo
 
-# ------------------------- Configuracion -------------------------
-CARPETA_DATOS = Path(os.getenv("DATA_DIR", "datasets"))
-ANIO_INICIO = int(os.getenv("START_YEAR", "2000"))      # solo partidos desde este anio
-VENTANA_FORMA = int(os.getenv("FORM_WINDOW", "5"))      # partidos previos para la forma
-CARPETA_SALIDA = Path(os.getenv("OUTPUT_DIR", "output"))
-GUARDAR_FINAL = CARPETA_SALIDA / "dataset_final.csv"
-CARPETA_FIGURAS = CARPETA_SALIDA / "figuras"
 
-# Nombres de los archivos. Deben coincidir EXACTAMENTE con los de tu carpeta.
-# OJO: en Kaggle el archivo de penaltis se llama 'shootouts.csv' (con h).
-ARCHIVO_RESULTS = "results.csv"
-ARCHIVO_GOLEADORES = "goalscorers.csv"
-ARCHIVO_SHOOTOUTS = "shootouts.csv"
+# ---------------------------------------------------------------------------
+# CONFIGURACION DEL PROYECTO
+# ---------------------------------------------------------------------------
+# Cada parametro se lee del entorno (archivo .env) y, si no existe ahi, se usa
+# un valor por defecto. Asi se pueden cambiar sin tocar el codigo.
+# os.getenv("CLAVE", "valor_por_defecto") => devuelve lo del .env o el defecto.
+
+CARPETA_DATOS = Path(os.getenv("DATA_DIR", "datasets"))     # donde estan los CSV
+ANIO_INICIO = int(os.getenv("START_YEAR", "2000"))         # solo partidos desde este anio
+VENTANA_FORMA = int(os.getenv("FORM_WINDOW", "5"))         # partidos previos para la "forma"
+CARPETA_SALIDA = Path(os.getenv("OUTPUT_DIR", "output"))   # donde se guardan resultados
+GUARDAR_FINAL = CARPETA_SALIDA / "dataset_final.csv"       # ruta del dataset final
+CARPETA_FIGURAS = CARPETA_SALIDA / "figuras"               # ruta de los graficos PNG
+
+# Nombres de los archivos de entrada. Deben coincidir EXACTAMENTE con los de
+# tu carpeta 'datasets/'. OJO: en Kaggle el de penaltis es 'shootouts.csv'.
+ARCHIVO_RESULTS = "results.csv"        # el principal: un partido por fila
+ARCHIVO_GOLEADORES = "goalscorers.csv"  # complementario (no se usa aun)
+ARCHIVO_SHOOTOUTS = "shootouts.csv"    # complementario (no se usa aun)
 
 
 def seccion(titulo: str) -> None:
-    """Imprime un separador de seccion."""
+    """Imprime un separador visual en consola para distinguir cada seccion.
+
+    Es puramente cosmetico: ayuda a leer la salida cuando se ejecuta el script.
+    """
     print("\n" + "#" * 60)
     print(f"# {titulo}")
     print("#" * 60)
 
 
-# ============================================================
-# 1. EDA INICIAL
-# ============================================================
+# ===========================================================================
+# SECCION 1 — EDA INICIAL: conocer los datos crudos antes de tocarlos
+# ===========================================================================
 def eda_inicial() -> pd.DataFrame:
-    """Carga los datos crudos, imprime el EDA inicial y devuelve results."""
+    """Carga los datos crudos, imprime un primer analisis y los devuelve.
+
+    El objetivo de esta seccion es ENTENDER los datos: cuantas filas hay, que
+    columnas, si hay valores nulos o duplicados, que proporcion de partidos
+    gana el local, etc. Todavia NO transformamos nada.
+    """
     seccion("1. EDA INICIAL")
 
-    # 1.1 Carga de archivos en orden (con validacion de columnas)
+    # 1.1 CARGA. Leemos los tres CSV. cargar_dataset() avisa con un mensaje
+    #     claro si algun archivo falta (en vez de un error tecnico confuso).
     results = utils.cargar_dataset(ARCHIVO_RESULTS, CARPETA_DATOS)
     goalscorers = utils.cargar_dataset(ARCHIVO_GOLEADORES, CARPETA_DATOS)
     shootouts = utils.cargar_dataset(ARCHIVO_SHOOTOUTS, CARPETA_DATOS)
+    # Verificamos que 'results' tenga las columnas que el pipeline necesita.
     utils.validar_columnas(results, utils.COLUMNAS_RESULTS, "results")
 
-    # 1.2 Estructura de cada dataset
+    # 1.2 ESTRUCTURA. Para cada tabla mostramos forma, tipos y nulos por columna.
     utils.mostrar_estructura(results, "results")
     utils.mostrar_estructura(goalscorers, "goalscorers")
     utils.mostrar_estructura(shootouts, "shootouts")
 
-    # 1.3 Duplicados (limpieza: se confirma antes de transformar)
+    # 1.3 DUPLICADOS. Confirmamos cuantas filas repetidas hay ANTES de limpiar,
+    #     para dejar constancia del estado original de los datos.
     print("\n--- Filas duplicadas exactas ---")
     print(f"results: {utils.contar_duplicados(results)}")
     print(f"goalscorers: {utils.contar_duplicados(goalscorers)}")
     print(f"shootouts: {utils.contar_duplicados(shootouts)}")
 
-    # 1.4 Proporcion local / empate / visitante (sobre todo el historico)
+    # 1.4 BALANCE DE RESULTADOS. Que tan frecuente es que gane el local, que
+    #     haya empate o que gane el visitante (sobre TODO el historico).
     print("\n--- Proporcion de resultados (historico completo) ---")
     print(utils.proporcion_resultados(results))
 
-    # 1.5 Paises unicos
+    # 1.5 PAISES. Cuantas selecciones distintas aparecen y cuanto juega cada una.
     print("\n--- Paises unicos y numero de partidos ---")
     paises = utils.paises_unicos(results)
     print(f"Total de paises distintos: {len(paises)}")
     print(paises.head(20))
 
-    # 1.6 Informacion adicional
+    # 1.6 CONTEXTO EXTRA. Rango de fechas, torneos mas frecuentes y cuantos
+    #     partidos se jugaron en cancha neutral (importante para la ventaja local).
     print("\n--- Informacion adicional ---")
-    results["date"] = pd.to_datetime(results["date"])
+    results["date"] = pd.to_datetime(results["date"])  # texto -> fecha real
     print(f"Rango de fechas: {results['date'].min().date()} a "
           f"{results['date'].max().date()}")
     print("\nTipos de torneo (top 10):")
@@ -96,73 +131,126 @@ def eda_inicial() -> pd.DataFrame:
     print("\nPartidos en cancha neutral:")
     print(results["neutral"].value_counts())
 
-    return results
+    return results  # devolvemos results para usarlo en la siguiente seccion
 
 
-# ============================================================
-# 2. TRANSFORMACION A UN SOLO DATASET
-# ============================================================
-def transformar(results: pd.DataFrame) -> pd.DataFrame:
-    """Aplica el pipeline de transformacion y guarda el dataset final."""
+# ===========================================================================
+# SECCION 2 — TRANSFORMACION: de datos crudos a un dataset listo para modelar
+# ===========================================================================
+def transformar(results: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Limpia los datos y construye el dataset final con sus variables.
+
+    Devuelve DOS tablas:
+      - dataset_final: la tabla lista para entrenar un modelo.
+      - df: los partidos ya filtrados/limpios (con la columna 'tournament'),
+            que reutilizamos en algunos graficos del EDA posterior.
+
+    El orden de los pasos NO es casual: primero se limpia y se ordena por fecha,
+    porque las variables de "forma reciente" dependen de ese orden temporal.
+    """
     seccion("2. TRANSFORMACION")
 
-    # 2.1 Filtrar desde el anio de inicio, quitar duplicados y ordenar por fecha
+    # 2.1 FILTRAR Y LIMPIAR. Conserva solo partidos desde ANIO_INICIO, descarta
+    #     partidos sin marcador y filas duplicadas, y ordena por fecha (clave
+    #     para que la "forma reciente" use solo el pasado de cada equipo).
     df = utils.filtrar_desde(results, ANIO_INICIO)
     print(f"Partidos desde {ANIO_INICIO}: {df.shape[0]}")
 
-    # 2.2 Unificar nombres de paises que cambiaron
+    # 2.2 UNIFICAR NOMBRES. Algunos paises cambiaron de nombre (p. ej.
+    #     "Serbia and Montenegro" -> "Serbia"). Los unificamos ANTES de calcular
+    #     la forma, para no partir el historial de una misma seleccion en dos.
     df = utils.unificar_nombres(df)
 
-    # 2.3 Crear la variable objetivo (local / empate / visitante)
+    # 2.3 VARIABLE OBJETIVO. Creamos la columna 'resultado' con 3 clases:
+    #     local / empate / visitante. Es lo que el futuro modelo intentara predecir.
     df = utils.crear_target(df)
 
-    # 2.4 Construir features de forma reciente (sin fuga de informacion)
+    # 2.4 INGENIERIA DE VARIABLES. Calculamos la "forma reciente" de cada equipo
+    #     (goles y puntos de sus ultimos partidos) SIN fuga de informacion: cada
+    #     partido solo usa datos de partidos ANTERIORES. Este es el paso clave.
     dataset_final = utils.construir_features(df, VENTANA_FORMA)
 
-    # 2.5 Guardar el dataset final
-    CARPETA_SALIDA.mkdir(parents=True, exist_ok=True)
+    # 2.5 GUARDAR. Escribimos el dataset final en disco para la siguiente etapa.
+    CARPETA_SALIDA.mkdir(parents=True, exist_ok=True)  # crea 'output/' si no existe
     dataset_final.to_csv(GUARDAR_FINAL, index=False)
     print(f"Dataset final guardado en: {GUARDAR_FINAL}")
     print(f"Forma del dataset final: {dataset_final.shape}")
     print("Columnas:", list(dataset_final.columns))
 
-    return dataset_final
+    return dataset_final, df
 
 
-# ============================================================
-# 3. EDA POSTERIOR (sobre el dataset final)
-# ============================================================
-def eda_posterior(dataset_final: pd.DataFrame) -> None:
-    """Valida el dataset final: estructura, distribucion, graficos."""
+# ===========================================================================
+# SECCION 3 — EDA POSTERIOR: validar el dataset final y graficar hallazgos
+# ===========================================================================
+def eda_posterior(dataset_final: pd.DataFrame,
+                  results_filtrado: pd.DataFrame) -> None:
+    """Revisa el dataset final y produce analisis y graficos del EDA.
+
+    Aqui comprobamos que la transformacion quedo bien (sin nulos inesperados,
+    con el balance de clases esperado) y extraemos hallazgos interesantes que
+    sirven para entender el problema antes de modelar.
+    """
     seccion("3. EDA POSTERIOR AL DATASET FINAL")
 
+    # Estructura del resultado: forma, tipos y nulos (deberia venir limpio).
     utils.mostrar_estructura(dataset_final, "dataset_final")
 
+    # DISTRIBUCION DEL OBJETIVO. Cuantos partidos de cada clase hay. Sirve para
+    # detectar "desbalance" (si una clase domina, el modelo puede sesgarse).
     print("\n--- Distribucion de la variable objetivo ---")
     conteo = dataset_final["resultado"].value_counts()
     porc = (dataset_final["resultado"]
             .value_counts(normalize=True).mul(100).round(2))
     print(pd.DataFrame({"partidos": conteo, "porcentaje": porc}))
 
+    # ESTADISTICOS de las variables numericas (medias, minimos, maximos...).
     print("\n--- Estadisticos de las features ---")
     print(dataset_final.describe())
 
+    # Un vistazo a las primeras filas para ver el aspecto final de la tabla.
     print("\n--- Primeras filas ---")
     print(dataset_final.head())
 
+    # ANALISIS ADICIONALES con contexto futbolistico.
+    # IMPORTANTE: estos se calculan sobre 'results_filtrado' (TODOS los partidos
+    # desde 2000), NO sobre dataset_final, porque este ultimo descarta los
+    # primeros partidos de cada equipo y sesgaria levemente el ranking historico.
+    print("\n--- Top 10 selecciones por rendimiento (pts por partido) ---")
+    ranking = utils.ranking_rendimiento(results_filtrado, min_partidos=50)
+    print(ranking.head(10).to_string(index=False))
+
+    # Ejemplo de "head to head": historial directo entre dos selecciones.
+    print("\n--- Historial directo de ejemplo: Brazil vs Argentina ---")
+    print(utils.head_to_head(results_filtrado, "Brazil", "Argentina")
+          .to_string(index=False))
+
+    # GRAFICOS. Cada funcion crea un PNG en output/figuras/. El comentario al
+    # lado dice que pregunta responde cada grafico.
     print("\n--- Graficos del EDA ---")
-    utils.graficar_distribucion_target(dataset_final, CARPETA_FIGURAS)
-    utils.graficar_partidos_por_anio(dataset_final, CARPETA_FIGURAS)
-    utils.graficar_ventaja_local(dataset_final, CARPETA_FIGURAS)
-    utils.graficar_forma_vs_resultado(dataset_final, CARPETA_FIGURAS)
+    utils.graficar_distribucion_target(dataset_final, CARPETA_FIGURAS)      # balance de clases
+    utils.graficar_partidos_por_anio(dataset_final, CARPETA_FIGURAS)        # cobertura temporal
+    utils.graficar_ventaja_local(dataset_final, CARPETA_FIGURAS)            # ventaja de local
+    utils.graficar_forma_vs_resultado(dataset_final, CARPETA_FIGURAS)       # la feature, ¿sirve?
+    utils.graficar_top_selecciones(results_filtrado, CARPETA_FIGURAS)       # potencias del periodo
+    utils.graficar_evolucion_ventaja_local(dataset_final, CARPETA_FIGURAS)  # ¿cambia con el tiempo?
+    utils.graficar_goles_por_torneo(results_filtrado, CARPETA_FIGURAS)      # torneos mas ofensivos
 
 
+# ===========================================================================
+# PUNTO DE ENTRADA DEL PROGRAMA
+# ===========================================================================
 def main() -> int:
-    """Ejecuta el pipeline completo. Devuelve 0 si todo salio bien."""
+    """Ejecuta el pipeline completo, en orden. Devuelve 0 si todo salio bien.
+
+    Envolvemos las 3 secciones en un try/except para que, si falta un archivo
+    o una columna, el usuario reciba un mensaje claro en vez de un error tecnico.
+    El valor devuelto (0 = exito, 1 = error) es util para automatizaciones.
+    """
     try:
-        results = eda_inicial()
-        dataset_final = transformar(results)
-        eda_posterior(dataset_final)
+        results = eda_inicial()                               # seccion 1
+        dataset_final, results_filtrado = transformar(results)  # seccion 2
+        eda_posterior(dataset_final, results_filtrado)        # seccion 3
     except (FileNotFoundError, ValueError) as exc:
         print(f"\n[ERROR] {exc}", file=sys.stderr)
         return 1
@@ -170,5 +258,7 @@ def main() -> int:
     return 0
 
 
+# Esta condicion hace que main() se ejecute SOLO si corremos este archivo
+# directamente (python main.py), y NO si alguien lo importa desde otro script.
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main())  # termina el programa con el codigo que devuelve main()

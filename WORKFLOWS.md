@@ -81,14 +81,22 @@ Objetivo: validar el dataset final.
 - Distribución de la variable objetivo (para detectar desbalanceo de clases).
 - Estadísticos de las variables (`describe()`).
 - Primeras filas (`head()`).
-- **Cuatro gráficos** guardados en `output/figuras/`:
+- **Análisis adicionales con contexto futbolístico:**
+  - Ranking de selecciones por rendimiento (puntos por partido), filtrando
+    equipos con pocos partidos (`utils.ranking_rendimiento`).
+  - Historial directo entre dos selecciones (`utils.head_to_head`), con
+    Brasil vs. Argentina como ejemplo impreso en consola.
+- **Siete gráficos** guardados en `output/figuras/`:
 
 | Figura | Qué muestra | Para qué sirve |
 |---|---|---|
-| `01_distribucion_target.png` | Barras de local/empate/visitante | Detectar desbalance de clases antes de modelar |
-| `02_partidos_por_anio.png` | Partidos por año | Verificar cobertura temporal (caída en 2020 por pandemia, p. ej.) |
+| `01_distribucion_target.png` | Barras de local/empate/visitante con % | Detectar desbalance de clases antes de modelar |
+| `02_partidos_por_anio.png` | Partidos por año (anota la caída de 2020) | Verificar cobertura temporal y el efecto COVID-19 |
 | `03_ventaja_local.png` | Resultado en cancha propia vs. neutral | Evidencia visual de la ventaja de local (cae ~10 pts en cancha neutral) |
 | `04_dif_forma_vs_resultado.png` | Boxplot de `dif_forma_pts` por clase | Validar que la feature principal discrimina entre clases |
+| `05_top_selecciones.png` | Top 15 selecciones por rendimiento | Dar contexto: qué selecciones dominan el periodo |
+| `06_evolucion_ventaja_local.png` | % de victorias locales por año | Ver si la ventaja de local se debilita con el tiempo |
+| `07_goles_por_torneo.png` | Promedio de goles por partido por torneo | Comparar qué competencias son más ofensivas |
 
 ## Prevención de fuga de información (data leakage)
 

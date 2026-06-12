@@ -22,10 +22,12 @@ El script `main.py` ejecuta un pipeline en tres secciones:
    duplicados, unifica nombres de países, crea la variable objetivo y construye
    las variables predictoras ("forma reciente" de cada equipo, **sin fuga de
    información**) en un único dataset listo para modelar.
-3. **EDA posterior:** revisa el dataset final y genera **cuatro gráficos** en
-   `output/figuras/` (distribución del objetivo, partidos por año, ventaja de
-   local en cancha propia vs. neutral, y poder discriminante de la feature
-   principal).
+3. **EDA posterior:** revisa el dataset final, calcula análisis con contexto
+   futbolístico (ranking de selecciones por rendimiento e historial directo
+   entre dos equipos) y genera **siete gráficos** en `output/figuras/`
+   (distribución del objetivo, partidos por año, ventaja de local en cancha
+   propia vs. neutral, poder discriminante de la feature principal, top de
+   selecciones, evolución de la ventaja de local y goles por torneo).
 
 El detalle paso a paso está en [`WORKFLOWS.md`](WORKFLOWS.md) y el origen y
 diccionario de los datos en [`DATABASE.md`](DATABASE.md).
