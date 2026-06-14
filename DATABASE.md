@@ -83,13 +83,19 @@ aparecen desde el año 2000 (alcance del proyecto).
 
 ## Decisiones de alcance
 
-- **Desde el año 2000:** se descartan los partidos anteriores para reducir el
-  sesgo de épocas muy distintas del fútbol y trabajar con datos más completos.
-- **Nombres actuales:** se unifican nombres de selecciones que cambiaron y que
-  pueden aparecer desde 2000 (ver `MAPA_NOMBRES` en `utils.py`); por eso no se
-  usa `former_names.csv`. La fusión "Serbia and Montenegro" → "Serbia" es una
-  decisión de modelado: se asume continuidad deportiva de la selección para no
-  fragmentar su historial reciente.
+- **Desde el año 1990:** se descartan los partidos anteriores. Esta fecha de
+  corte se eligió con base en datos, no por intuición. Al analizar las métricas
+  del fútbol por década (goles por partido, % de victorias local/empate/
+  visitante), se observa que **desde 1990 son estables y casi idénticas a las
+  actuales** (≈2.7 goles/partido, ≈48% victoria local), mientras que el fútbol
+  previo a los años 70-80 era muy distinto (en los 1950s se marcaban ≈4 goles
+  por partido). Incluir esos partidos antiguos introduciría patrones de un
+  fútbol que ya no existe, restando representatividad. El año es un parámetro
+  único y editable (`ANIO_INICIO` en `main.py`).
+- **Nombres actuales:** se unifican nombres de selecciones que cambiaron (ver
+  `MAPA_NOMBRES` en `utils.py`); por eso no se usa `former_names.csv`. La fusión
+  "Serbia and Montenegro" → "Serbia" es una decisión de modelado: se asume
+  continuidad deportiva de la selección para no fragmentar su historial.
 - **Solo `results`:** el dataset final se construye solo a partir de `results`.
   `goalscorers` y `shootouts` se reservan como posibles mejoras futuras.
 

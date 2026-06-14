@@ -7,21 +7,63 @@ y se apoya en funciones de `utils.py`.
 ## Vista general del flujo
 
 ```
-datasets/results.csv ─┐
-datasets/goalscorers.csv ─┼─► [1. EDA inicial] ─► results validado
-datasets/shootouts.csv ─┘            │
-                                     ▼
-                          [2. Transformación]
-              filtrar ≥ 2000 ► quitar duplicados ► unificar nombres
-                     ► crear target ► features de forma (shift+rolling)
-                                     │
-                                     ▼
-                      output/dataset_final.csv
-                                     │
-                                     ▼
-                          [3. EDA posterior]
-              estadísticos + distribución + 4 figuras PNG
-                        (output/figuras/*.png)
+┌────────────────────────────────────────────────────────┐
+│                   FUENTES DE ENTRADA                   │
+│  • datasets/results.csv                                │
+│  • datasets/goalscorers.csv                            │
+│  • datasets/shootouts.csv                              │
+└───────────────────────────┬────────────────────────────┘
+                            │
+                            ▼
+┌────────────────────────────────────────────────────────┐
+│                     1. EDA INICIAL                     │
+│  • Validación de consistencia                          │
+│  • Integración y cruce de datos                        │
+└───────────────────────────┬────────────────────────────┘
+                            │
+                            ▼
+┌────────────────────────────────────────────────────────┐
+│                    RESULTS VALIDADO                    │
+└───────────────────────────┬────────────────────────────┘
+                            │
+                            ▼
+┌────────────────────────────────────────────────────────┐
+│                   2. TRANSFORMACIÓN                    │
+│  • Filtrar años ≥ 1990                                 │
+│  • Eliminar registros duplicados                       │
+│  • Unificar nombres de equipos                         │
+│  • Crear variable objetivo (target)                    │
+│  • Asignar identificador único (match_id)              │
+└───────────────────────────┬────────────────────────────┘
+                            │
+                            ▼
+┌────────────────────────────────────────────────────────┐
+│                 INGENIERÍA DE FEATURES                 │
+│                  (Evitando data leakage)               │
+│  • Cálculo de forma reciente (shift + rolling)         │
+│  • Cálculo de puntuación ELO                           │
+│  • Historial de enfrentamientos (Head-to-Head)         │
+│  • Nivel de importancia del partido                    │
+└───────────────────────────┬────────────────────────────┘
+                            │
+                            ▼
+┌────────────────────────────────────────────────────────┐
+│                output/dataset_final.csv                │
+└───────────────────────────┬────────────────────────────┘
+                            │
+                            ▼
+┌────────────────────────────────────────────────────────┐
+│                    3. EDA POSTERIOR                    │
+│  • Extracción de estadísticos descriptivos             │
+│  • Análisis de distribución de variables               │
+└───────────────────────────┬────────────────────────────┘
+                            │
+                            ▼
+┌────────────────────────────────────────────────────────┐
+│                  ARTEFACTOS DE SALIDA                  │
+│  • 4 Figuras gráficas en formato PNG                   │
+│    Ruta: (output/figuras/*.png)                        │
+└────────────────────────────────────────────────────────┘
 ```
 
 ## Sección 1 — EDA inicial (`eda_inicial()`)
@@ -52,7 +94,7 @@ Objetivo: producir un único dataset listo para el modelo.
 
 1. **Filtrado temporal y limpieza** (`utils.filtrar_desde`): convierte la
    fecha, descarta partidos sin marcador, **elimina filas duplicadas exactas**
-   y conserva solo los jugados desde el año 2000 (`START_YEAR`). Ordena por
+   y conserva solo los jugados desde el año 1990 (`ANIO_INICIO`). Ordena por
    fecha (imprescindible para no usar información del futuro).
 2. **Unificación de nombres** (`utils.unificar_nombres`): reemplaza nombres
    antiguos por los actuales (p. ej. "Serbia and Montenegro" → "Serbia") usando
@@ -68,7 +110,27 @@ Objetivo: producir un único dataset listo para el modelo.
    - Vuelve a unir esas variables al partido, separadas en local y visitante, y
      añade `dif_forma_pts` (diferencia de forma entre ambos).
    - Descarta las primeras filas de cada equipo (sin historial todavía).
-5. **Guardado**: el resultado se escribe en `output/dataset_final.csv`.
+
+   Antes de este paso, `transformar()` asigna un `match_id` único a cada partido;
+   `construir_features` lo **respeta si ya existe**, de modo que todas las
+   features (forma, ELO, head-to-head, importancia) comparten el mismo
+   identificador y se unen sin ambigüedad.
+5. **Features adicionales** (Fase 4), todas calculadas SIN fuga (solo con
+   información anterior a cada partido) y unidas al dataset por `match_id`:
+   - **`utils.calcular_importancia`**: traduce el torneo a una variable ordinal
+     `importancia` (amistoso=0 < clasificatorio=1 < competitivo=2 < mundial=3).
+     Es un dato del propio partido, conocido antes del pitido.
+   - **`utils.calcular_elo`**: recorre los partidos en orden cronológico y
+     mantiene un rating ELO por selección (todas arrancan en 1500). Para cada
+     partido guarda el rating **previo** de ambos equipos (`local_elo`,
+     `visit_elo`, `dif_elo`) y luego lo actualiza según el resultado, con
+     ventaja de local salvo en cancha neutral. Capta la fuerza acumulada a
+     largo plazo, complementaria a la forma reciente.
+   - **`utils.calcular_head_to_head`**: por par de selecciones, resume los
+     enfrentamientos **previos** desde la perspectiva del local: número de
+     duelos (`h2h_n`), puntos promedio (`h2h_pts_local`) y diferencia de goles
+     promedio (`h2h_dif_gol_local`). Sin historial usa valores neutros.
+6. **Guardado**: el resultado se escribe en `output/dataset_final.csv`.
    Ni `output/` ni `datasets/` se versionan (ver `.gitignore`): los CSV
    crudos son pesados y se descargan de Kaggle, y la salida es regenerable
    ejecutando `python main.py`.
@@ -110,6 +172,11 @@ ordenando sus partidos por fecha, la columna `*_forma_*` de un partido
 coincide con el promedio de sus `VENTANA_FORMA` partidos **anteriores**,
 nunca incluye el propio partido.
 
+La misma disciplina aplica a las features de la Fase 4: el `ELO` guarda el
+rating **previo** a cada partido (se actualiza después), el `head-to-head` solo
+mira duelos anteriores, e `importancia` es un dato del calendario conocido antes
+de jugar. Ninguna usa el resultado que se intenta predecir.
+
 ## Columnas del dataset final
 
 - `match_id`, `date`, `home_team`, `away_team`, `neutral`
@@ -117,3 +184,9 @@ nunca incluye el propio partido.
 - `local_forma_gf`, `local_forma_gc`, `local_forma_pts`
 - `visit_forma_gf`, `visit_forma_gc`, `visit_forma_pts`
 - `dif_forma_pts`
+- `local_elo`, `visit_elo`, `dif_elo`
+- `h2h_n`, `h2h_pts_local`, `h2h_dif_gol_local`
+- `importancia`
+
+El significado de cada columna y cómo se calcula están en el **diccionario del
+dataset** del `README.md`.

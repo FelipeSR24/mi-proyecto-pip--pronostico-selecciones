@@ -18,6 +18,7 @@ Convencion: las funciones que empiezan con guion bajo (p. ej. _guardar) son
 ============================================================================
 """
 
+from collections import defaultdict
 from pathlib import Path
 
 import matplotlib
@@ -44,8 +45,6 @@ MAPA_NOMBRES: dict[str, str] = {
     "Yugoslavia": "Serbia",
     "Czechia": "Czech Republic",
 }
-
-# Columnas que 'results.csv' DEBE tener para que el pipeline funcione. Se usan
 # en validar_columnas() para detectar a tiempo un archivo incorrecto o cambiado.
 COLUMNAS_RESULTS: list[str] = [
     "date", "home_team", "away_team", "home_score", "away_score",
@@ -205,7 +204,7 @@ def head_to_head(df: pd.DataFrame, equipo_a: str,
 # ===========================================================================
 # BLOQUE 3 — TRANSFORMACION (limpiar y construir las variables del modelo)
 # ===========================================================================
-def filtrar_desde(results: pd.DataFrame, anio: int = 2000) -> pd.DataFrame:
+def filtrar_desde(results: pd.DataFrame, anio: int = 1970) -> pd.DataFrame:
     """
     Limpia y filtra los partidos. Devuelve solo los jugados desde 'anio',
     ordenados por fecha. El ORDEN de los pasos importa:
@@ -230,6 +229,9 @@ def unificar_nombres(results: pd.DataFrame,
     """Reemplaza los nombres antiguos de selecciones por su nombre actual,
     usando el diccionario MAPA_NOMBRES. Asi un mismo equipo no aparece partido
     en dos identidades distintas (p. ej. 'Czechia' y 'Czech Republic')."""
+    # Trabajamos sobre una COPIA para no alterar el DataFrame original que nos
+    # pasaron (buena practica: una funcion no debe tener "efectos secundarios"
+    # sobre los datos de quien la llama). 'results' pasa a apuntar a la copia.
     results = results.copy()
     # .replace(mapa) cambia cada valor que sea una clave del diccionario por su
     # valor correspondiente; los demas nombres quedan intactos.
@@ -246,7 +248,7 @@ def crear_target(results: pd.DataFrame) -> pd.DataFrame:
       empate    -> mismo numero de goles
       visitante -> el visitante marco mas goles
     """
-    results = results.copy()
+    results = results.copy()  # copia defensiva (no modificar el original recibido)
     # np.select evalua una lista de condiciones EN ORDEN y asigna el primer
     # valor cuya condicion sea verdadera; si ninguna lo es, usa 'default'.
     condiciones = [
@@ -275,9 +277,13 @@ def construir_features(results: pd.DataFrame, ventana: int = 5) -> pd.DataFrame:
       2. Calcular medias moviles desplazadas (shift + rolling).
       3. Volver a unir las variables al partido, separadas en local y visitante.
     """
-    results = results.copy()
+    results = results.copy()  # copia defensiva (no modificar el original recibido)
     # Damos a cada partido un identificador unico para poder reagrupar luego.
-    results["match_id"] = range(len(results))
+    # Si quien llama YA asigno 'match_id' (p. ej. main.py, para compartir el
+    # mismo id entre todas las features: forma, ELO, head-to-head, importancia),
+    # lo respetamos; si no, lo creamos aqui. Asi todo queda alineado por match_id.
+    if "match_id" not in results.columns:
+        results["match_id"] = range(len(results))
 
     # ----- PASO 1: FORMATO LARGO -----
     # Un partido tiene DOS equipos. Para analizar la trayectoria de cada equipo,
@@ -309,22 +315,46 @@ def construir_features(results: pd.DataFrame, ventana: int = 5) -> pd.DataFrame:
         default=0,
     )
 
-    # ----- PASO 2: MEDIAS MOVILES SIN FUGA DE INFORMACION -----
-    # Ordenamos los partidos de cada equipo por fecha (cronologicamente).
+    # ----- PASO 2: "FORMA RECIENTE" SIN MIRAR EL FUTURO -----
+    # Queremos que cada fila tenga el promedio de los ULTIMOS partidos del
+    # equipo, pero SIN incluir el partido actual (eso seria "hacer trampa":
+    # el modelo no puede saber el resultado de hoy para predecir hoy).
+    #
+    # Primero ordenamos los partidos de cada equipo del mas viejo al mas nuevo.
     largo = largo.sort_values(["equipo", "date"]).reset_index(drop=True)
-    g = largo.groupby("equipo")  # agrupamos para calcular por equipo por separado
 
-    # La combinacion CLAVE: shift(1) + rolling(ventana).mean()
-    #   - shift(1)  : "corre" los datos una posicion, de modo que la fila actual
-    #                 NO se incluye a si misma -> esto evita la fuga de informacion.
-    #   - rolling(ventana).mean() : promedio de los 'ventana' partidos anteriores.
-    #   - min_periods=1 : permite calcular aunque haya menos partidos al inicio.
-    largo["forma_gf"] = g["gf"].transform(
-        lambda s: s.shift(1).rolling(ventana, min_periods=1).mean())
-    largo["forma_gc"] = g["gc"].transform(
-        lambda s: s.shift(1).rolling(ventana, min_periods=1).mean())
-    largo["forma_pts"] = g["pts"].transform(
-        lambda s: s.shift(1).rolling(ventana, min_periods=1).mean())
+    # Agrupamos por equipo para que los calculos de un equipo nunca se mezclen
+    # con los de otro (la "forma" de Brasil no debe usar partidos de Peru).
+    g = largo.groupby("equipo")
+
+    # Para cada equipo aplicamos DOS operaciones encadenadas a sus goles/puntos:
+    #
+    #   1) .shift(1)  -> DESPLAZA los valores una fila hacia abajo. Asi, la fila
+    #                    de "hoy" pasa a mostrar el dato de "ayer". Es el truco
+    #                    que evita la fuga de informacion: el partido actual
+    #                    queda excluido de su propio promedio.
+    #
+    #   2) .rolling(ventana).mean() -> hace el promedio de una "ventana
+    #                    deslizante" de los ultimos 'ventana' partidos (por
+    #                    defecto 5). min_periods=1 permite calcular aunque el
+    #                    equipo tenga menos de 5 partidos jugados al inicio.
+    #
+    # EJEMPLO con los puntos de un equipo (ventana=3):
+    #   Partidos en orden:        [3, 0, 1, 3, 3]   (pts de cada partido)
+    #   Tras shift(1):            [NaN, 3, 0, 1, 3] (corre todo una posicion)
+    #   Tras rolling(3).mean():   [NaN, 3, 1.5, 1.33, 2.33]
+    #   -> En el 4o partido, su "forma" es 1.33 = promedio de los 3 anteriores
+    #      (3, 0, 1), SIN contar el partido 4. Exactamente lo que queremos.
+    #
+    # Usamos .transform() porque devuelve un resultado del mismo tamano que la
+    # tabla original, listo para asignarlo como una columna nueva.
+    def forma_reciente(serie: pd.Series) -> pd.Series:
+        """Promedio de los 'ventana' valores ANTERIORES (sin el actual)."""
+        return serie.shift(1).rolling(ventana, min_periods=1).mean()
+
+    largo["forma_gf"] = g["gf"].transform(forma_reciente)    # goles a favor
+    largo["forma_gc"] = g["gc"].transform(forma_reciente)    # goles en contra
+    largo["forma_pts"] = g["pts"].transform(forma_reciente)  # puntos
 
     # ----- PASO 3: VOLVER A UNIR AL PARTIDO -----
     # Nos quedamos con el id, el rol y las tres variables de forma.
@@ -361,6 +391,182 @@ def construir_features(results: pd.DataFrame, ventana: int = 5) -> pd.DataFrame:
     # queda vacia), asi que se descartan. Es ~1% de las filas.
     final = final.dropna().reset_index(drop=True)
     return final
+
+
+# ---------------------------------------------------------------------------
+# FEATURES ADICIONALES (Fase 4): importancia del torneo, ELO y head-to-head.
+# Las tres reciben los partidos limpios CON columna 'match_id' y devuelven un
+# frame delgado [match_id, ...features] para unirlo al dataset por ese id, igual
+# que se hace con la forma reciente. Las tres respetan la regla de oro: cada
+# partido solo usa informacion conocida ANTES de jugarlo (sin fuga).
+# ---------------------------------------------------------------------------
+
+# Escala ORDINAL de importancia del partido. Es un dato del propio partido (el
+# torneo en que se juega), conocido ANTES del pitido inicial, asi que NO mete
+# fuga de informacion. A mayor numero, mas hay en juego.
+IMPORTANCIA_AMISTOSO = 0        # amistosos (sin nada en juego)
+IMPORTANCIA_CLASIFICATORIO = 1  # eliminatorias / clasificatorios
+IMPORTANCIA_COMPETITIVO = 2     # otros torneos oficiales (continentales, etc.)
+IMPORTANCIA_MUNDIAL = 3         # fase final de la Copa del Mundo
+
+
+def _clasificar_torneo(torneo: str) -> int:
+    """Traduce el nombre del torneo a un nivel ORDINAL de importancia (0 a 3).
+
+    Funcion interna. Compara el nombre del torneo (en minusculas) con palabras
+    clave. El ORDEN de las comprobaciones IMPORTA: 'FIFA World Cup qualification'
+    contiene tanto 'qualif' como 'world cup' y debe contar como clasificatorio
+    (no como fase final), por eso 'qualif' se evalua ANTES que 'world cup'.
+    """
+    t = str(torneo).lower()
+    if "friendly" in t:
+        return IMPORTANCIA_AMISTOSO
+    if "qualif" in t:
+        return IMPORTANCIA_CLASIFICATORIO
+    if "world cup" in t:
+        return IMPORTANCIA_MUNDIAL
+    return IMPORTANCIA_COMPETITIVO
+
+
+def calcular_importancia(results: pd.DataFrame) -> pd.DataFrame:
+    """Devuelve [match_id, importancia]: que tanto esta en juego en cada partido.
+
+    QUE hace: convierte la columna 'tournament' en una variable ordinal
+    'importancia' (amistoso=0 < clasificatorio=1 < competitivo=2 < mundial=3).
+    POR QUE: las selecciones rinden distinto segun lo que este en juego (un
+    amistoso no se afronta igual que un Mundial) y esa senal no estaba en el
+    dataset. No hay fuga: el torneo se conoce antes de jugar el partido.
+    """
+    results = results.copy()  # no mutar el DataFrame de entrada
+    importancia = results["tournament"].apply(_clasificar_torneo)
+    return pd.DataFrame({
+        "match_id": results["match_id"],
+        "importancia": importancia,
+    })
+
+
+def calcular_elo(results: pd.DataFrame,
+                 base: float = 1500.0,
+                 k: float = 20.0,
+                 ventaja_local: float = 65.0) -> pd.DataFrame:
+    """Devuelve [match_id, local_elo, visit_elo, dif_elo]: la fuerza ELO previa.
+
+    QUE hace: asigna a cada seleccion un rating ELO que sube al ganar y baja al
+    perder, y para cada partido guarda el rating de ambos equipos ANTES de
+    jugarlo. 'dif_elo' (local - visitante) resume quien llega mas fuerte.
+    POR QUE: la "forma reciente" solo mira los ultimos partidos; el ELO captura
+    la fuerza ACUMULADA a largo plazo, que suele ser la senal mas predictiva en
+    selecciones.
+
+    SIN FUGA DE INFORMACION: recorremos los partidos en orden cronologico y
+    leemos el rating de cada equipo ANTES de actualizarlo con el resultado. Asi,
+    el ELO de un partido refleja unicamente lo ocurrido en partidos anteriores.
+
+    Parametros:
+      base: rating inicial de una seleccion sin historial (estandar: 1500).
+      k: cuanto se ajusta el rating tras cada partido (mayor k = mas volatil).
+      ventaja_local: bonus en puntos ELO para el equipo de casa al calcular la
+        expectativa; NO se aplica si el partido es en cancha neutral.
+    """
+    results = results.copy()
+    # Procesamos del partido mas antiguo al mas reciente (match_id desempata de
+    # forma estable). defaultdict hace que cualquier equipo nuevo arranque en 'base'.
+    orden = results.sort_values(["date", "match_id"])
+    ratings: dict[str, float] = defaultdict(lambda: base)
+
+    filas = []
+    for fila in orden.itertuples(index=False):
+        r_local = ratings[fila.home_team]
+        r_visit = ratings[fila.away_team]
+
+        # Expectativa de victoria del local segun la diferencia de rating
+        # (formula logistica estandar del ELO). Sumamos la ventaja de local
+        # salvo en cancha neutral.
+        bonus = 0.0 if fila.neutral else ventaja_local
+        esperado_local = 1.0 / (1.0 + 10 ** (-(r_local + bonus - r_visit) / 400))
+
+        # Resultado real desde la perspectiva del local: 1 gana, 0.5 empata, 0 pierde.
+        if fila.home_score > fila.away_score:
+            real_local = 1.0
+        elif fila.home_score == fila.away_score:
+            real_local = 0.5
+        else:
+            real_local = 0.0
+
+        # Guardamos el rating PREVIO (la feature) ANTES de actualizar: esto es lo
+        # que evita la fuga de informacion.
+        filas.append({
+            "match_id": fila.match_id,
+            "local_elo": r_local,
+            "visit_elo": r_visit,
+            "dif_elo": r_local - r_visit,
+        })
+
+        # Actualizacion ELO (suma cero: lo que gana uno lo pierde el otro).
+        cambio = k * (real_local - esperado_local)
+        ratings[fila.home_team] = r_local + cambio
+        ratings[fila.away_team] = r_visit - cambio
+
+    return pd.DataFrame(filas)
+
+
+def calcular_head_to_head(results: pd.DataFrame) -> pd.DataFrame:
+    """Devuelve [match_id, h2h_n, h2h_pts_local, h2h_dif_gol_local]: el historial directo.
+
+    QUE hace: para cada partido mira los enfrentamientos PREVIOS entre esas dos
+    mismas selecciones y resume como le fue al equipo LOCAL contra ese rival:
+      h2h_n             -> cuantos duelos previos existian (mide la confianza).
+      h2h_pts_local     -> puntos promedio del local en esos duelos (0 a 3).
+      h2h_dif_gol_local -> diferencia de goles promedio a favor del local.
+    POR QUE: algunos cruces tienen una historia marcada (un equipo que casi
+    siempre le gana a otro) que ni la forma ni el ELO capturan del todo.
+
+    SIN FUGA: recorremos en orden cronologico y solo usamos duelos ANTERIORES al
+    partido actual; el partido se añade al historial DESPUES de calcular sus
+    features. Como el 28% de los cruces tiene un solo enfrentamiento, cuando no
+    hay historial se rellena con valores neutros (1.5 puntos, 0 de diferencia) y
+    h2h_n=0 le avisa al modelo de que esa informacion es poco fiable.
+    """
+    results = results.copy()
+    orden = results.sort_values(["date", "match_id"])
+    # Historial por PAR de selecciones. Usamos frozenset para que el par sea el
+    # mismo sin importar quien jugo de local ({A,B} == {B,A}).
+    historial: dict[frozenset, list] = defaultdict(list)
+
+    filas = []
+    for fila in orden.itertuples(index=False):
+        local, visitante = fila.home_team, fila.away_team
+        previos = historial[frozenset((local, visitante))]
+
+        if previos:
+            puntos, difs = [], []
+            for h_local, h_gf, h_gc in previos:
+                # Reorientamos cada duelo previo a la perspectiva del LOCAL actual:
+                # gl = goles del local de hoy en aquel duelo, gr = los del rival.
+                gl, gr = (h_gf, h_gc) if h_local == local else (h_gc, h_gf)
+                puntos.append(3 if gl > gr else (1 if gl == gr else 0))
+                difs.append(gl - gr)
+            h2h_n = len(previos)
+            h2h_pts = sum(puntos) / h2h_n
+            h2h_dif = sum(difs) / h2h_n
+        else:
+            # Sin enfrentamientos previos: valores neutros (h2h_n=0 lo señala).
+            h2h_n, h2h_pts, h2h_dif = 0, 1.5, 0.0
+
+        filas.append({
+            "match_id": fila.match_id,
+            "h2h_n": h2h_n,
+            "h2h_pts_local": h2h_pts,
+            "h2h_dif_gol_local": h2h_dif,
+        })
+
+        # Añadimos ESTE partido al historial del par, para los FUTUROS (no el actual).
+        # Guardamos quien fue local y el marcador para poder reorientarlo despues.
+        historial[frozenset((local, visitante))].append(
+            (local, fila.home_score, fila.away_score)
+        )
+
+    return pd.DataFrame(filas)
 
 
 # ===========================================================================
@@ -475,7 +681,7 @@ def graficar_top_selecciones(df: pd.DataFrame, carpeta: str | Path,
     fig, ax = plt.subplots(figsize=(8, 6))
     ax.barh(tabla["equipo"], tabla["pts_por_partido"], color="#2a9d8f")
     ax.set_title(f"Top {n} selecciones por rendimiento "
-                 f"(mín. {min_partidos} partidos, desde 2000)")
+                 f"(mín. {min_partidos} partidos, desde 1990)")
     ax.set_xlabel("Puntos por partido (3 victoria · 1 empate · 0 derrota)")
     ax.set_ylabel("Selección")
     for i, v in enumerate(tabla["pts_por_partido"]):

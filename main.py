@@ -27,7 +27,6 @@ en la carpeta 'datasets/' (ver DATABASE.md para el detalle del origen).
 """
 
 # --- Librerias estandar de Python ---
-import os                 # para leer variables de entorno (la configuracion)
 import sys                # para escribir errores en la salida de error estandar
 from pathlib import Path  # para manejar rutas de carpetas de forma segura
 
@@ -37,34 +36,36 @@ import pandas as pd       # la herramienta central para manejar tablas de datos
 # --- Nuestro propio modulo de funciones auxiliares ---
 import utils              # aqui estan TODAS las funciones que hacen el trabajo
 
-# Intentamos cargar el archivo .env (configuracion opcional). Si la libreria
-# python-dotenv no esta instalada, no pasa nada: se usan los valores por defecto.
-try:
-    from dotenv import load_dotenv
-    load_dotenv()  # lee el archivo .env y lo carga como variables de entorno
-except ImportError:
-    pass  # sin dotenv seguimos con los valores por defecto definidos abajo
 
+# ===========================================================================
+# CONFIGURACION DEL PROYECTO  (UNICO lugar para cambiar parametros)
+# ===========================================================================
+# Todos los parametros ajustables del proyecto estan reunidos aqui como
+# constantes. Si necesitas cambiar algo (el anio de corte, la ventana de forma,
+# las carpetas), lo haces SOLO en este bloque y todo el pipeline se adapta.
+# No se usa un archivo .env porque este proyecto no maneja datos sensibles
+# (credenciales, claves): son simples parametros de configuracion del codigo.
 
-# ---------------------------------------------------------------------------
-# CONFIGURACION DEL PROYECTO
-# ---------------------------------------------------------------------------
-# Cada parametro se lee del entorno (archivo .env) y, si no existe ahi, se usa
-# un valor por defecto. Asi se pueden cambiar sin tocar el codigo.
-# os.getenv("CLAVE", "valor_por_defecto") => devuelve lo del .env o el defecto.
+# Anio desde el cual se conservan los partidos. Se eligio 1990 porque desde esa
+# decada las metricas del futbol (goles por partido, % de victorias) son
+# estables y representativas del futbol actual; incluir partidos mas antiguos
+# meteria patrones de un futbol distinto (ver analisis en DATABASE.md).
+ANIO_INICIO = 1990
 
-CARPETA_DATOS = Path(os.getenv("DATA_DIR", "datasets"))     # donde estan los CSV
-ANIO_INICIO = int(os.getenv("START_YEAR", "2000"))         # solo partidos desde este anio
-VENTANA_FORMA = int(os.getenv("FORM_WINDOW", "5"))         # partidos previos para la "forma"
-CARPETA_SALIDA = Path(os.getenv("OUTPUT_DIR", "output"))   # donde se guardan resultados
-GUARDAR_FINAL = CARPETA_SALIDA / "dataset_final.csv"       # ruta del dataset final
-CARPETA_FIGURAS = CARPETA_SALIDA / "figuras"               # ruta de los graficos PNG
+# Numero de partidos previos que se promedian para calcular la "forma reciente".
+VENTANA_FORMA = 5
+
+# Carpetas de entrada (CSV crudos) y de salida (dataset final y figuras).
+CARPETA_DATOS = Path("datasets")
+CARPETA_SALIDA = Path("output")
+GUARDAR_FINAL = CARPETA_SALIDA / "dataset_final.csv"  # ruta del dataset final
+CARPETA_FIGURAS = CARPETA_SALIDA / "figuras"          # ruta de los graficos PNG
 
 # Nombres de los archivos de entrada. Deben coincidir EXACTAMENTE con los de
 # tu carpeta 'datasets/'. OJO: en Kaggle el de penaltis es 'shootouts.csv'.
-ARCHIVO_RESULTS = "results.csv"        # el principal: un partido por fila
+ARCHIVO_RESULTS = "results.csv"         # el principal: un partido por fila
 ARCHIVO_GOLEADORES = "goalscorers.csv"  # complementario (no se usa aun)
-ARCHIVO_SHOOTOUTS = "shootouts.csv"    # complementario (no se usa aun)
+ARCHIVO_SHOOTOUTS = "shootouts.csv"     # complementario (no se usa aun)
 
 
 def seccion(titulo: str) -> None:
@@ -165,12 +166,31 @@ def transformar(results: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     #     local / empate / visitante. Es lo que el futuro modelo intentara predecir.
     df = utils.crear_target(df)
 
-    # 2.4 INGENIERIA DE VARIABLES. Calculamos la "forma reciente" de cada equipo
+    # 2.4 IDENTIFICADOR UNICO. Asignamos un 'match_id' a cada partido ANTES de
+    #     construir las features, para que TODAS (forma, ELO, head-to-head e
+    #     importancia) queden alineadas por el mismo identificador al unirlas.
+    df = df.reset_index(drop=True)
+    df["match_id"] = range(len(df))
+
+    # 2.5 INGENIERIA DE VARIABLES. Calculamos la "forma reciente" de cada equipo
     #     (goles y puntos de sus ultimos partidos) SIN fuga de informacion: cada
     #     partido solo usa datos de partidos ANTERIORES. Este es el paso clave.
     dataset_final = utils.construir_features(df, VENTANA_FORMA)
 
-    # 2.5 GUARDAR. Escribimos el dataset final en disco para la siguiente etapa.
+    # 2.6 FEATURES ADICIONALES (Fase 4). Tres senales nuevas, todas calculadas
+    #     SIN fuga (solo con informacion previa a cada partido) y unidas por
+    #     'match_id': fuerza ELO de cada seleccion, historial directo entre ambas
+    #     e importancia del torneo. Usamos merge POR LA IZQUIERDA porque
+    #     construir_features ya descarto los primeros partidos de cada equipo.
+    elo = utils.calcular_elo(df)
+    h2h = utils.calcular_head_to_head(df)
+    importancia = utils.calcular_importancia(df)
+    dataset_final = (dataset_final
+                     .merge(elo, on="match_id", how="left")
+                     .merge(h2h, on="match_id", how="left")
+                     .merge(importancia, on="match_id", how="left"))
+
+    # 2.7 GUARDAR. Escribimos el dataset final en disco para la siguiente etapa.
     CARPETA_SALIDA.mkdir(parents=True, exist_ok=True)  # crea 'output/' si no existe
     dataset_final.to_csv(GUARDAR_FINAL, index=False)
     print(f"Dataset final guardado en: {GUARDAR_FINAL}")

@@ -18,10 +18,12 @@ El script `main.py` ejecuta un pipeline en tres secciones:
 1. **EDA inicial:** carga y valida los datasets, muestra su estructura, cuenta
    duplicados, la proporción de resultados (local/empate/visitante), la lista
    de países y otra información exploratoria.
-2. **Transformación:** filtra los partidos desde el año 2000, elimina
+2. **Transformación:** filtra los partidos desde el año 1990, elimina
    duplicados, unifica nombres de países, crea la variable objetivo y construye
-   las variables predictoras ("forma reciente" de cada equipo, **sin fuga de
-   información**) en un único dataset listo para modelar.
+   las variables predictoras —**todas sin fuga de información**— en un único
+   dataset listo para modelar: la "forma reciente" de cada equipo, su rating
+   **ELO** acumulado, el **historial directo** (head-to-head) entre ambas
+   selecciones y la **importancia** del torneo.
 3. **EDA posterior:** revisa el dataset final, calcula análisis con contexto
    futbolístico (ranking de selecciones por rendimiento e historial directo
    entre dos equipos) y genera **siete gráficos** en `output/figuras/`
@@ -39,7 +41,6 @@ mi-proyecto-pip/
 ├── main.py            # pipeline principal (las 3 secciones)
 ├── utils.py           # funciones auxiliares y gráficos
 ├── requirements.txt   # librerías con versiones acotadas
-├── .env.example       # plantilla de configuración (main.py la lee)
 ├── .gitignore
 ├── README.md          # este archivo
 ├── WORKFLOWS.md       # detalle de lo que hace el código
@@ -57,8 +58,7 @@ Al trabajar en local existen además dos carpetas que **no se versionan**
 ## Requisitos
 
 - Python 3.11 (probado con 3.11.9; debería funcionar con 3.10+)
-- Las librerías de `requirements.txt` (pandas, numpy, matplotlib,
-  python-dotenv)
+- Las librerías de `requirements.txt` (pandas, numpy, matplotlib)
 
 ## Cómo usarlo
 
@@ -86,10 +86,7 @@ Al trabajar en local existen además dos carpetas que **no se versionan**
    (ver `DATABASE.md`). Verifica que los nombres coincidan exactamente con
    los esperados.
 
-4. (Opcional) Copia `.env.example` como `.env` si quieres cambiar parámetros
-   sin tocar el código.
-
-5. Ejecuta el pipeline:
+4. Ejecuta el pipeline:
 
    ```bash
    python main.py
@@ -100,15 +97,75 @@ modelo) y las figuras del EDA en `output/figuras/`.
 
 ## Configuración
 
-Los parámetros se leen del archivo `.env` (si existe) y tienen estos valores
-por defecto:
+Todos los parámetros ajustables están reunidos como constantes al inicio de
+`main.py` (un único lugar para cambiarlos):
 
-| Variable      | Valor por defecto | Descripción                                  |
-|---------------|-------------------|----------------------------------------------|
-| `DATA_DIR`    | `datasets`        | Carpeta de los CSV crudos                     |
-| `OUTPUT_DIR`  | `output`          | Carpeta de salida (dataset final y figuras)   |
-| `START_YEAR`  | `2000`            | Año desde el cual se conservan partidos       |
-| `FORM_WINDOW` | `5`               | Partidos previos para la forma reciente       |
+| Constante       | Valor  | Descripción                                  |
+|-----------------|--------|----------------------------------------------|
+| `ANIO_INICIO`   | `1990` | Año desde el cual se conservan partidos       |
+| `VENTANA_FORMA` | `5`    | Partidos previos para la forma reciente       |
+| `CARPETA_DATOS` | `datasets` | Carpeta de los CSV crudos                 |
+| `CARPETA_SALIDA`| `output`   | Carpeta de salida (dataset y figuras)     |
+
+El año de inicio se fijó en **1990** porque desde esa década las métricas del
+fútbol son estables y representativas del fútbol actual (ver el análisis en
+`DATABASE.md`).
+
+## Diccionario del dataset final
+
+`output/dataset_final.csv` tiene una fila por partido. Las columnas se agrupan
+por familia. **Regla de oro:** toda variable predictora responde a *"¿qué se
+sabía ANTES de este partido?"*; ninguna usa información del propio partido ni de
+partidos futuros (ver "Prevención de fuga" en `WORKFLOWS.md`).
+
+### Identificadores y objetivo (no son variables del modelo)
+
+| Columna | Qué significa | Cómo se calcula |
+|---|---|---|
+| `match_id` | Identificador único del partido; solo sirve para unir las features. | Número de fila tras ordenar los partidos por fecha. |
+| `date`, `home_team`, `away_team` | Fecha y selecciones. Describen el partido, no se usan como entrada. | Directo del dato crudo. |
+| `resultado` *(objetivo)* | Lo que el modelo predecirá: `local` / `empate` / `visitante`. | Comparando `home_score` y `away_score`. |
+
+### Contexto del partido
+
+| Columna | Qué significa | Cómo se calcula |
+|---|---|---|
+| `neutral` (0/1) | Si se jugó en cancha neutral (sin ventaja de local). | Del dato crudo; booleano → 0/1. |
+| `importancia` (0–3) | Cuánto hay en juego: amistoso=0, clasificatorio=1, competitivo=2, mundial=3. | Mapeo del nombre del torneo (`tournament`) a una escala ordinal. |
+
+### Forma reciente
+
+Promedio de los **últimos 5 partidos** de cada equipo, *sin* incluir el partido
+actual (`shift(1)` + `rolling(5).mean()`). El sufijo `local_`/`visit_` indica el
+equipo; cada uno usa sus propios últimos 5 partidos (en cualquier cancha).
+
+| Columna | Qué significa | Cómo se calcula |
+|---|---|---|
+| `local_forma_gf`, `visit_forma_gf` | Pegada ofensiva: goles a favor por partido. Más = mejor. | Media de los 5 partidos anteriores. |
+| `local_forma_gc`, `visit_forma_gc` | Solidez defensiva: goles en contra por partido. **Menos = mejor.** | Media de los 5 partidos anteriores. |
+| `local_forma_pts`, `visit_forma_pts` | Racha de resultados: puntos por partido (3/1/0), de 0 a 3. | Media de los 5 partidos anteriores. |
+| `dif_forma_pts` | Quién llega en mejor forma (positivo = el local). | `local_forma_pts − visit_forma_pts`. |
+
+### ELO (fuerza acumulada a largo plazo)
+
+A diferencia de la forma (solo 5 partidos), el ELO resume **toda** la trayectoria.
+
+| Columna | Qué significa | Cómo se calcula |
+|---|---|---|
+| `local_elo`, `visit_elo` | Nivel histórico de cada selección (toda arranca en 1500; rango típico ~1300–2100). | Rating **previo** al partido; sube al ganar y baja al perder según lo sorpresivo del resultado (con ventaja de local salvo en cancha neutral). |
+| `dif_elo` | Diferencia de nivel entre ambas. Es la variable más informativa. | `local_elo − visit_elo`. |
+
+### Historial directo (head-to-head)
+
+Resume los enfrentamientos **previos** entre esas dos mismas selecciones, desde
+la perspectiva del local actual. Si no hay historial, se rellena con valores
+neutros y `h2h_n=0` avisa de que el dato es poco fiable.
+
+| Columna | Qué significa | Cómo se calcula |
+|---|---|---|
+| `h2h_n` | Cuántos duelos previos había entre ambas (mide la confianza, no la fuerza). | Conteo de enfrentamientos anteriores. |
+| `h2h_pts_local` | Puntos promedio del local contra ese rival (0–3): ¿lo domina o le cuesta? | Media sobre los duelos previos; relleno neutro = 1.5 si no hay. |
+| `h2h_dif_gol_local` | Diferencia de goles promedio a favor del local en esos duelos. | Media sobre los duelos previos; relleno neutro = 0 si no hay. |
 
 ## Control de versiones
 
