@@ -149,10 +149,16 @@ equipo; cada uno usa sus propios últimos 5 partidos (en cualquier cancha).
 ### ELO (fuerza acumulada a largo plazo)
 
 A diferencia de la forma (solo 5 partidos), el ELO resume **toda** la trayectoria.
+Implementa la fórmula **oficial de eloratings.net** (el ranking mundial): el
+cambio de rating es `K · G · (resultado − esperado)`, donde `K` depende de la
+importancia del torneo (20 amistoso, 30 competitivo, 40 clasificatoria, 60
+Mundial) y `G` amplifica según el margen de goles (ganar por mucho sube más, con
+rendimientos decrecientes). Se valida contra el ranking real: las potencias del
+top-10 coinciden con eloratings.net.
 
 | Columna | Qué significa | Cómo se calcula |
 |---|---|---|
-| `local_elo`, `visit_elo` | Nivel histórico de cada selección (toda arranca en 1500; rango típico ~1300–2100). | Rating **previo** al partido; sube al ganar y baja al perder según lo sorpresivo del resultado (con ventaja de local salvo en cancha neutral). |
+| `local_elo`, `visit_elo` | Nivel histórico de cada selección (toda arranca en 1500; rango ~810–2220). | Rating **previo** al partido; sube al ganar y baja al perder según lo sorpresivo del resultado, el margen de goles y la importancia del torneo (con ventaja de local de 100 puntos salvo en cancha neutral). |
 | `dif_elo` | Diferencia de nivel entre ambas. Es la variable más informativa. | `local_elo − visit_elo`. |
 
 ### Historial directo (head-to-head)

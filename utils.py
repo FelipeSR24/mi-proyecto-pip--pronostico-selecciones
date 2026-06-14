@@ -445,56 +445,95 @@ def calcular_importancia(results: pd.DataFrame) -> pd.DataFrame:
     })
 
 
-def calcular_elo(results: pd.DataFrame,
-                 base: float = 1500.0,
-                 k: float = 20.0,
-                 ventaja_local: float = 65.0) -> pd.DataFrame:
-    """Devuelve [match_id, local_elo, visit_elo, dif_elo]: la fuerza ELO previa.
+# ---------------------------------------------------------------------------
+# Constantes oficiales del ELO (segun eloratings.net, el ranking mundial).
+# ---------------------------------------------------------------------------
+# Ventaja de jugar en casa, expresada en puntos ELO. eloratings.net usa 100:
+# es como si el local llegara con 100 puntos extra al calcular su expectativa.
+# NO se aplica en cancha neutral (ahi nadie tiene ventaja de campo).
+ELO_VENTAJA_LOCAL = 100.0
 
-    QUE hace: asigna a cada seleccion un rating ELO que sube al ganar y baja al
-    perder, y para cada partido guarda el rating de ambos equipos ANTES de
-    jugarlo. 'dif_elo' (local - visitante) resume quien llega mas fuerte.
-    POR QUE: la "forma reciente" solo mira los ultimos partidos; el ELO captura
-    la fuerza ACUMULADA a largo plazo, que suele ser la senal mas predictiva en
-    selecciones.
+# Rating inicial de una seleccion que aun no tiene historial (valor estandar).
+ELO_BASE = 1500.0
 
-    SIN FUGA DE INFORMACION: recorremos los partidos en orden cronologico y
-    leemos el rating de cada equipo ANTES de actualizarlo con el resultado. Asi,
-    el ELO de un partido refleja unicamente lo ocurrido en partidos anteriores.
+# Peso K por TIPO de torneo (cuanto puede cambiar el rating tras un partido).
+# Cuanto mas importante el partido, mayor el peso. Son los valores oficiales de
+# eloratings.net, indexados por la escala de importancia (0 a 3) que ya
+# calculamos con _clasificar_torneo. A mayor importancia, mayor K.
+ELO_K_POR_IMPORTANCIA = {
+    IMPORTANCIA_AMISTOSO: 20.0,       # amistoso: el resultado pesa poco
+    IMPORTANCIA_CLASIFICATORIO: 40.0,  # clasificatorias
+    IMPORTANCIA_COMPETITIVO: 30.0,     # otros torneos oficiales
+    IMPORTANCIA_MUNDIAL: 60.0,         # fase final del Mundial: pesa mucho
+}
 
-    Parametros:
-      base: rating inicial de una seleccion sin historial (estandar: 1500).
-      k: cuanto se ajusta el rating tras cada partido (mayor k = mas volatil).
-      ventaja_local: bonus en puntos ELO para el equipo de casa al calcular la
-        expectativa; NO se aplica si el partido es en cancha neutral.
+
+def _factor_g(diferencia_goles: int) -> float:
+    """Factor G: cuanto AMPLIFICA el marcador el cambio de rating (margen de gol).
+
+    Recibe: la diferencia de goles del partido (en valor absoluto).
+    Entrega: un multiplicador G segun la formula OFICIAL de eloratings.net.
+
+    Idea: ganar por mucho demuestra mas superioridad que ganar por poco, asi que
+    mueve mas el rating. Pero con "rendimientos decrecientes": pasar de ganar por
+    1 a por 2 importa mas que pasar de 6 a 7. Formula oficial:
+       G = 1                  si la diferencia es 0 o 1 gol
+       G = 1.5                si la diferencia es 2 goles
+       G = 1.75               si la diferencia es 3 goles
+       G = 1.75 + (N-3)/8     si la diferencia es 4 o mas goles (N = diferencia)
+    """
+    n = abs(diferencia_goles)
+    if n <= 1:
+        return 1.0
+    if n == 2:
+        return 1.5
+    if n == 3:
+        return 1.75
+    return 1.75 + (n - 3) / 8.0
+
+
+def calcular_elo(results: pd.DataFrame) -> pd.DataFrame:
+    """Calcula el rating ELO de cada seleccion (version OFICIAL eloratings.net).
+
+    QUE RECIBE: el DataFrame de partidos 'results', que debe tener las columnas
+      match_id, date, home_team, away_team, home_score, away_score, neutral
+      e importancia (la escala 0-3 calculada por calcular_importancia).
+
+    QUE ENTREGA: un DataFrame con una fila por partido y las columnas
+      [match_id, local_elo, visit_elo, dif_elo], donde cada ELO es el rating que
+      el equipo tenia ANTES de ese partido. 'dif_elo' = local_elo - visit_elo.
+
+    QUE ES EL ELO: un puntaje de fuerza (heredado del ajedrez) que sube al ganar
+    y baja al perder. Su gracia es que PONDERA AL RIVAL: ganarle a un equipo
+    fuerte sube mas que ganarle a uno debil. Todas las selecciones arrancan en
+    1500. Captura la fuerza ACUMULADA a largo plazo, la senal mas predictiva en
+    selecciones (complementa a la "forma reciente", que solo mira 5 partidos).
+
+    COMO FUNCIONA (para cada partido, en orden cronologico):
+      1. Se lee el rating PREVIO de ambos equipos (eso es la feature que se guarda).
+      2. Se calcula la expectativa de victoria del local con la formula logistica,
+         sumando la ventaja de local (100 puntos) salvo en cancha neutral.
+      3. Tras ver el resultado real, se actualiza el rating:
+             nuevo = previo + K * G * (resultado_real - esperado)
+         donde K depende de la importancia del torneo (amistoso=20 ... mundial=60)
+         y G amplifica segun el margen de goles (ver _factor_g). Es de SUMA CERO:
+         lo que gana un equipo lo pierde el otro.
+
+    SIN FUGA DE INFORMACION: el rating se GUARDA antes de actualizarlo, asi que el
+    ELO de un partido solo refleja lo ocurrido en partidos ANTERIORES.
     """
     results = results.copy()
-    # Procesamos del partido mas antiguo al mas reciente (match_id desempata de
-    # forma estable). defaultdict hace que cualquier equipo nuevo arranque en 'base'.
+    # Recorremos del partido mas antiguo al mas reciente (match_id desempata de
+    # forma estable). defaultdict hace que un equipo nuevo arranque en ELO_BASE.
     orden = results.sort_values(["date", "match_id"])
-    ratings: dict[str, float] = defaultdict(lambda: base)
+    ratings: dict[str, float] = defaultdict(lambda: ELO_BASE)
 
     filas = []
     for fila in orden.itertuples(index=False):
-        r_local = ratings[fila.home_team]
-        r_visit = ratings[fila.away_team]
+        r_local = ratings[fila.home_team]   # rating previo del local
+        r_visit = ratings[fila.away_team]   # rating previo del visitante
 
-        # Expectativa de victoria del local segun la diferencia de rating
-        # (formula logistica estandar del ELO). Sumamos la ventaja de local
-        # salvo en cancha neutral.
-        bonus = 0.0 if fila.neutral else ventaja_local
-        esperado_local = 1.0 / (1.0 + 10 ** (-(r_local + bonus - r_visit) / 400))
-
-        # Resultado real desde la perspectiva del local: 1 gana, 0.5 empata, 0 pierde.
-        if fila.home_score > fila.away_score:
-            real_local = 1.0
-        elif fila.home_score == fila.away_score:
-            real_local = 0.5
-        else:
-            real_local = 0.0
-
-        # Guardamos el rating PREVIO (la feature) ANTES de actualizar: esto es lo
-        # que evita la fuga de informacion.
+        # --- Paso 1: guardar el rating PREVIO (la feature, sin fuga) ---
         filas.append({
             "match_id": fila.match_id,
             "local_elo": r_local,
@@ -502,10 +541,26 @@ def calcular_elo(results: pd.DataFrame,
             "dif_elo": r_local - r_visit,
         })
 
-        # Actualizacion ELO (suma cero: lo que gana uno lo pierde el otro).
-        cambio = k * (real_local - esperado_local)
-        ratings[fila.home_team] = r_local + cambio
-        ratings[fila.away_team] = r_visit - cambio
+        # --- Paso 2: expectativa de victoria del local ---
+        # Se suma la ventaja de local salvo en cancha neutral. La formula
+        # logistica convierte la diferencia de rating en una probabilidad (0 a 1).
+        bonus = 0.0 if fila.neutral else ELO_VENTAJA_LOCAL
+        esperado_local = 1.0 / (1.0 + 10 ** (-(r_local + bonus - r_visit) / 400))
+
+        # --- Paso 3: resultado real desde la perspectiva del local ---
+        if fila.home_score > fila.away_score:
+            real_local = 1.0     # gano el local
+        elif fila.home_score == fila.away_score:
+            real_local = 0.5     # empate
+        else:
+            real_local = 0.0     # gano el visitante
+
+        # --- Paso 4: actualizar el rating con K (importancia) y G (margen) ---
+        k = ELO_K_POR_IMPORTANCIA.get(fila.importancia, 20.0)
+        g = _factor_g(fila.home_score - fila.away_score)
+        cambio = k * g * (real_local - esperado_local)
+        ratings[fila.home_team] = r_local + cambio   # suma cero:
+        ratings[fila.away_team] = r_visit - cambio   # lo que sube uno, baja el otro
 
     return pd.DataFrame(filas)
 
@@ -595,6 +650,8 @@ def _guardar(fig: plt.Figure, carpeta: str | Path, nombre: str) -> Path:
 def graficar_distribucion_target(df: pd.DataFrame,
                                  carpeta: str | Path) -> Path:
     """Barra con la distribucion de la variable objetivo (desbalance)."""
+    # value_counts() ordena por frecuencia; reindex fuerza el orden fijo
+    # local/empate/visitante para que el grafico siempre se vea igual.
     conteo = df["resultado"].value_counts().reindex(
         ["local", "empate", "visitante"])
     total = conteo.sum()
@@ -633,6 +690,15 @@ def graficar_ventaja_local(df: pd.DataFrame, carpeta: str | Path) -> Path:
     Compara la proporcion local/empate/visitante en cancha propia vs neutral.
     Es la evidencia visual de la 'ventaja de local'.
     """
+    # Construimos una tabla con el % de cada resultado, separado por tipo de
+    # cancha. La cadena de operaciones hace, paso a paso:
+    #   1) groupby("neutral")              -> separa partidos en cancha propia / neutral
+    #   2) .value_counts(normalize=True)   -> dentro de cada grupo, la PROPORCION
+    #                                         (0 a 1) de local / empate / visitante
+    #   3) .mul(100)                       -> pasa la proporcion a porcentaje
+    #   4) .rename(...) / .reset_index()   -> da nombre a la columna y aplana el indice
+    #   5) .pivot(...)                     -> reordena a una tabla: filas = tipo de
+    #                                         cancha, columnas = resultado, celdas = %
     tabla = (df.groupby("neutral")["resultado"]
                .value_counts(normalize=True)
                .mul(100)
@@ -640,7 +706,9 @@ def graficar_ventaja_local(df: pd.DataFrame, carpeta: str | Path) -> Path:
                .reset_index()
                .pivot(index="neutral", columns="resultado",
                       values="porcentaje"))
-    tabla = tabla[["local", "empate", "visitante"]]
+    tabla = tabla[["local", "empate", "visitante"]]  # orden fijo de columnas
+    # La columna 'neutral' es booleana (True/False); la traducimos a etiquetas
+    # legibles para el eje del grafico.
     tabla.index = tabla.index.map({False: "Cancha propia",
                                    True: "Cancha neutral"})
     fig, ax = plt.subplots(figsize=(7, 4))
@@ -696,8 +764,13 @@ def graficar_evolucion_ventaja_local(df: pd.DataFrame,
     Linea con el % de victorias locales por anio (solo partidos NO neutrales).
     Permite ver si la ventaja de local se ha debilitado con el tiempo.
     """
+    # Nos quedamos solo con partidos NO neutrales (donde hay un local real).
+    # El '~' invierte el booleano: ~neutral = "no es cancha neutral".
     propia = df[~df["neutral"].astype(bool)].copy()
     propia["anio"] = propia["date"].dt.year
+    # Por cada anio, calculamos el % de partidos que gano el local. La lambda
+    # convierte la columna 'resultado' en True/False (¿fue 'local'?) y .mean()
+    # de una serie booleana da justamente la proporcion de True (x100 = %).
     pct_local = (propia.groupby("anio")["resultado"]
                  .apply(lambda s: (s == "local").mean() * 100))
     fig, ax = plt.subplots(figsize=(8, 4))

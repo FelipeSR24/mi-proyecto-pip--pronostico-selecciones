@@ -121,16 +121,25 @@ Objetivo: producir un único dataset listo para el modelo.
      `importancia` (amistoso=0 < clasificatorio=1 < competitivo=2 < mundial=3).
      Es un dato del propio partido, conocido antes del pitido.
    - **`utils.calcular_elo`**: recorre los partidos en orden cronológico y
-     mantiene un rating ELO por selección (todas arrancan en 1500). Para cada
-     partido guarda el rating **previo** de ambos equipos (`local_elo`,
-     `visit_elo`, `dif_elo`) y luego lo actualiza según el resultado, con
-     ventaja de local salvo en cancha neutral. Capta la fuerza acumulada a
-     largo plazo, complementaria a la forma reciente.
+     mantiene un rating ELO por selección (todas arrancan en 1500), usando la
+     fórmula **oficial de eloratings.net**: `cambio = K · G · (real − esperado)`.
+     El peso `K` depende de la importancia del torneo (amistoso=20 … Mundial=60)
+     y `G` amplifica según el margen de goles (ganar por más mueve más el rating,
+     con rendimientos decrecientes). Para cada partido guarda el rating **previo**
+     de ambos equipos (`local_elo`, `visit_elo`, `dif_elo`) y luego lo actualiza,
+     con ventaja de local de 100 puntos salvo en cancha neutral. Capta la fuerza
+     acumulada a largo plazo; su top-10 coincide con el ranking mundial real.
    - **`utils.calcular_head_to_head`**: por par de selecciones, resume los
      enfrentamientos **previos** desde la perspectiva del local: número de
      duelos (`h2h_n`), puntos promedio (`h2h_pts_local`) y diferencia de goles
      promedio (`h2h_dif_gol_local`). Sin historial usa valores neutros.
-6. **Guardado**: el resultado se escribe en `output/dataset_final.csv`.
+
+   Como la `importancia` alimenta el `K` del ELO, se calcula y se une a los
+   partidos **antes** de llamar a `calcular_elo`.
+6. **Redondeo**: las features se calculan con muchos decimales que no aportan
+   precisión útil; antes de guardar se redondean (ELO y diferencias a 1 decimal,
+   forma y head-to-head a 2) para dejar el CSV legible sin afectar al modelo.
+7. **Guardado**: el resultado se escribe en `output/dataset_final.csv`.
    Ni `output/` ni `datasets/` se versionan (ver `.gitignore`): los CSV
    crudos son pesados y se descargan de Kaggle, y la salida es regenerable
    ejecutando `python main.py`.

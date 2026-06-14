@@ -177,20 +177,45 @@ def transformar(results: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     #     partido solo usa datos de partidos ANTERIORES. Este es el paso clave.
     dataset_final = utils.construir_features(df, VENTANA_FORMA)
 
-    # 2.6 FEATURES ADICIONALES (Fase 4). Tres senales nuevas, todas calculadas
-    #     SIN fuga (solo con informacion previa a cada partido) y unidas por
-    #     'match_id': fuerza ELO de cada seleccion, historial directo entre ambas
-    #     e importancia del torneo. Usamos merge POR LA IZQUIERDA porque
-    #     construir_features ya descarto los primeros partidos de cada equipo.
-    elo = utils.calcular_elo(df)
-    h2h = utils.calcular_head_to_head(df)
+    # 2.6 FEATURES ADICIONALES. Senales nuevas, todas calculadas SIN fuga (solo
+    #     con informacion previa a cada partido) y unidas por 'match_id'.
+    #     ORDEN IMPORTANTE: la 'importancia' se calcula PRIMERO y se une a 'df',
+    #     porque el ELO oficial la necesita (su factor K depende de si el partido
+    #     es amistoso, clasificatorio, competitivo o Mundial).
     importancia = utils.calcular_importancia(df)
+    df = df.merge(importancia, on="match_id", how="left")  # el ELO usara esta col.
+
+    elo = utils.calcular_elo(df)              # fuerza acumulada (usa 'importancia')
+    h2h = utils.calcular_head_to_head(df)     # historial directo entre ambas
+
+    # Unimos las nuevas columnas al dataset. merge POR LA IZQUIERDA porque
+    # construir_features ya descarto los primeros partidos de cada equipo.
     dataset_final = (dataset_final
                      .merge(elo, on="match_id", how="left")
                      .merge(h2h, on="match_id", how="left")
                      .merge(importancia, on="match_id", how="left"))
 
-    # 2.7 GUARDAR. Escribimos el dataset final en disco para la siguiente etapa.
+    # 2.7 REDONDEO. Las features se calculan con muchos decimales (el ELO arrastra
+    #     ~13, las medias hasta 16) que no aportan precision util y ensucian el
+    #     CSV. Redondeamos: ELO y diferencias a 1 decimal; forma y head-to-head a
+    #     2. No afecta al modelo (la diferencia es invisible) y deja el dataset
+    #     legible. Las columnas enteras (match_id, h2h_n, importancia) no se tocan.
+    cols_1_decimal = ["local_elo", "visit_elo", "dif_elo"]
+    cols_2_decimales = [
+        "local_forma_gf", "local_forma_gc", "local_forma_pts",
+        "visit_forma_gf", "visit_forma_gc", "visit_forma_pts", "dif_forma_pts",
+        "h2h_pts_local", "h2h_dif_gol_local",
+    ]
+    dataset_final[cols_1_decimal] = dataset_final[cols_1_decimal].round(1)
+    dataset_final[cols_2_decimales] = dataset_final[cols_2_decimales].round(2)
+    # Recalculamos dif_elo y dif_forma_pts desde los valores YA redondeados, para
+    # que la resta sea exacta (evita descuadres de 0.1 por redondeos separados).
+    dataset_final["dif_elo"] = (dataset_final["local_elo"]
+                                - dataset_final["visit_elo"]).round(1)
+    dataset_final["dif_forma_pts"] = (dataset_final["local_forma_pts"]
+                                      - dataset_final["visit_forma_pts"]).round(2)
+
+    # 2.8 GUARDAR. Escribimos el dataset final en disco para la siguiente etapa.
     CARPETA_SALIDA.mkdir(parents=True, exist_ok=True)  # crea 'output/' si no existe
     dataset_final.to_csv(GUARDAR_FINAL, index=False)
     print(f"Dataset final guardado en: {GUARDAR_FINAL}")
