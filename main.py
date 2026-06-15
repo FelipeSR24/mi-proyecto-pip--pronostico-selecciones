@@ -195,6 +195,15 @@ def transformar(results: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
                      .merge(h2h, on="match_id", how="left")
                      .merge(importancia, on="match_id", how="left"))
 
+    # 2.6.b GOLES REALES. El modelo Poisson (etapa de modelado) predice cuantos
+    #       goles marca cada equipo, asi que necesita 'home_score'/'away_score'
+    #       como variable objetivo. La forma reciente los uso y descarto, por eso
+    #       los recuperamos aqui desde 'df' cruzando por match_id. NO son features
+    #       de entrada (serian fuga: son el resultado del propio partido); se
+    #       guardan solo como objetivo para el Poisson.
+    goles = df[["match_id", "home_score", "away_score"]]
+    dataset_final = dataset_final.merge(goles, on="match_id", how="left")
+
     # 2.7 REDONDEO. Las features se calculan con muchos decimales (el ELO arrastra
     #     ~13, las medias hasta 16) que no aportan precision util y ensucian el
     #     CSV. Redondeamos: ELO y diferencias a 1 decimal; forma y head-to-head a
