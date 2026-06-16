@@ -2,34 +2,42 @@
 
 > **Asignatura:** Fundamentos de Ciencia de Datos
 > **Autores:** Cesar Estiven Moreno Betancur y Felipe Sandoval Ramírez
-> **Entrega:** 1 — EDA y preparación de datos
 
-Proyecto de ingeniería y ciencia de datos cuyo objetivo final es **predecir el
-resultado de un partido entre dos selecciones** (gana local / empate / gana
-visitante) y, a partir de ahí, estimar probabilidades de cara al Mundial 2026.
+Proyecto de ingeniería y ciencia de datos que **predice el resultado de un
+partido entre dos selecciones** (gana local / empate / gana visitante) y, a
+partir de un modelo de goles, estima el **marcador más probable** y una **matriz
+de marcadores**, todo expuesto en una **web interactiva** orientada al Mundial
+2026.
 
-Este repositorio cubre por ahora el **EDA y la preparación de datos**. El modelo
-de pronóstico se construirá en una etapa posterior.
+El proyecto cubre el ciclo completo de ciencia de datos: desde el análisis
+exploratorio y la preparación de los datos, pasando por el modelado y su
+evaluación, hasta un producto final navegable.
 
-## Qué hace
+## Las tres salidas del producto
 
-El script `main.py` ejecuta un pipeline en tres secciones:
+Para un partido elegido por el usuario (local, visitante, fase y tipo de cancha),
+la web entrega:
 
-1. **EDA inicial:** carga y valida los datasets, muestra su estructura, cuenta
-   duplicados, la proporción de resultados (local/empate/visitante), la lista
-   de países y otra información exploratoria.
-2. **Transformación:** filtra los partidos desde el año 1990, elimina
-   duplicados, unifica nombres de países, crea la variable objetivo y construye
-   las variables predictoras —**todas sin fuga de información**— en un único
-   dataset listo para modelar: la "forma reciente" de cada equipo, su rating
-   **ELO** acumulado, el **historial directo** (head-to-head) entre ambas
-   selecciones y la **importancia** del torneo.
-3. **EDA posterior:** revisa el dataset final, calcula análisis con contexto
-   futbolístico (ranking de selecciones por rendimiento e historial directo
-   entre dos equipos) y genera **siete gráficos** en `output/figuras/`
-   (distribución del objetivo, partidos por año, ventaja de local en cancha
-   propia vs. neutral, poder discriminante de la feature principal, top de
-   selecciones, evolución de la ventaja de local y goles por torneo).
+1. **Probabilidades del resultado** — gana local / empate / gana visitante.
+2. **Matriz de marcadores** — la probabilidad de cada marcador posible.
+3. **Marcador más probable** — con un ranking de los tres más probables.
+
+## Las cuatro etapas (y sus archivos)
+
+1. **Datos** (`main.py` + `utils.py`): cargan los CSV de Kaggle y construyen el
+   dataset final, con la variable objetivo y las features predictoras —todas
+   **sin fuga de información**—: forma reciente, rating **ELO** (fórmula oficial
+   de eloratings.net), **head-to-head** e **importancia** del torneo. Genera
+   también los gráficos del EDA.
+2. **Modelos** (`modelo.py`): entrena y evalúa los modelos con validación
+   **temporal**. Un clasificador 1X2 (regresión logística, comparada contra
+   gradient boosting) para las probabilidades, y un modelo **Poisson** de goles
+   para el marcador y la matriz. Se mide con accuracy, log-loss y Brier.
+3. **Predicción** (`prediccion.py`): el "cerebro" que reconstruye las features de
+   un partido nuevo a partir del estado más reciente de cada selección y entrega
+   las tres salidas. Es lo que consume la web.
+4. **Web** (`app.py`): interfaz interactiva en Streamlit con identidad visual del
+   Mundial 2026; el usuario elige las selecciones y ve las tres salidas.
 
 El detalle paso a paso está en [`WORKFLOWS.md`](WORKFLOWS.md) y el origen y
 diccionario de los datos en [`DATABASE.md`](DATABASE.md).
@@ -38,9 +46,13 @@ diccionario de los datos en [`DATABASE.md`](DATABASE.md).
 
 ```
 mi-proyecto-pip/
-├── main.py            # pipeline principal (las 3 secciones)
-├── utils.py           # funciones auxiliares y gráficos
+├── main.py            # etapa 1: pipeline de datos (EDA + dataset final)
+├── utils.py           # funciones auxiliares y gráficos del EDA
+├── modelo.py          # etapa 2: entrenamiento y evaluación de los modelos
+├── prediccion.py      # etapa 3: lógica de predicción de un partido nuevo
+├── app.py             # etapa 4: web interactiva (Streamlit)
 ├── requirements.txt   # librerías con versiones acotadas
+├── setup.cfg          # configuración de flake8 (estilo del código)
 ├── .gitignore
 ├── README.md          # este archivo
 ├── WORKFLOWS.md       # detalle de lo que hace el código
@@ -52,8 +64,9 @@ Al trabajar en local existen además dos carpetas que **no se versionan**
 
 - `datasets/` — los CSV crudos de Kaggle, que colocas tú manualmente
   (ver `DATABASE.md`).
-- `output/` — el `dataset_final.csv` y las figuras del EDA, que se generan
-  automáticamente al ejecutar `python main.py`.
+- `output/` — el `dataset_final.csv`, las figuras del EDA (`output/figuras/`) y
+  las figuras de evaluación de los modelos (`output/figuras_modelo/`), que se
+  generan al ejecutar `python main.py` y `python modelo.py`.
 
 ## Requisitos
 
@@ -86,14 +99,33 @@ Al trabajar en local existen además dos carpetas que **no se versionan**
    (ver `DATABASE.md`). Verifica que los nombres coincidan exactamente con
    los esperados.
 
-4. Ejecuta el pipeline:
+4. **Etapa 1 — genera el dataset** (necesario para todo lo demás):
 
    ```bash
    python main.py
    ```
 
-Al terminar, se generan `output/dataset_final.csv` (datos listos para el
-modelo) y las figuras del EDA en `output/figuras/`.
+   Crea `output/dataset_final.csv` (datos listos para el modelo) y las figuras
+   del EDA en `output/figuras/`.
+
+5. **Etapa 2 — entrena y evalúa los modelos** (opcional, para ver las métricas):
+
+   ```bash
+   python modelo.py
+   ```
+
+   Imprime las métricas de cada modelo (accuracy, log-loss, Brier) y guarda las
+   figuras de evaluación en `output/figuras_modelo/`.
+
+6. **Etapa 4 — abre la web interactiva** (el producto final):
+
+   ```bash
+   streamlit run app.py
+   ```
+
+   Se abre sola en el navegador. Elige las dos selecciones, la fase y el tipo de
+   cancha, y pulsa "Predecir" para ver las tres salidas. (La web entrena los
+   modelos al arrancar, así que la primera carga tarda unos segundos.)
 
 ## Configuración
 
@@ -124,7 +156,8 @@ partidos futuros (ver "Prevención de fuga" en `WORKFLOWS.md`).
 |---|---|---|
 | `match_id` | Identificador único del partido; solo sirve para unir las features. | Número de fila tras ordenar los partidos por fecha. |
 | `date`, `home_team`, `away_team` | Fecha y selecciones. Describen el partido, no se usan como entrada. | Directo del dato crudo. |
-| `resultado` *(objetivo)* | Lo que el modelo predecirá: `local` / `empate` / `visitante`. | Comparando `home_score` y `away_score`. |
+| `resultado` *(objetivo)* | Lo que el clasificador predecirá: `local` / `empate` / `visitante`. | Comparando `home_score` y `away_score`. |
+| `home_score`, `away_score` *(objetivo del Poisson)* | Goles de cada equipo. **No son features** (serían fuga); se usan solo como objetivo del modelo de goles. | Directo del dato crudo. |
 
 ### Contexto del partido
 
@@ -173,14 +206,31 @@ neutros y `h2h_n=0` avisa de que el dato es poco fiable.
 | `h2h_pts_local` | Puntos promedio del local contra ese rival (0–3): ¿lo domina o le cuesta? | Media sobre los duelos previos; relleno neutro = 1.5 si no hay. |
 | `h2h_dif_gol_local` | Diferencia de goles promedio a favor del local en esos duelos. | Media sobre los duelos previos; relleno neutro = 0 si no hay. |
 
+## Los modelos (etapa 2)
+
+`modelo.py` entrena y evalúa los modelos con **validación temporal** (entrena con
+partidos anteriores a 2022 y valida con los posteriores, para imitar la
+predicción real del futuro). Se usan dos modelos complementarios:
+
+| Modelo | Para qué | Resultado en validación |
+|---|---|---|
+| **Regresión logística** (1X2) | Probabilidades de local / empate / visitante | Accuracy ≈ 60 %, bien calibrada |
+| **Gradient boosting** (1X2) | Alternativa potente, solo para comparar | Empata con la logística → se elige la logística por ser interpretable |
+| **Poisson** (goles) | Marcador más probable y matriz de marcadores | MAE ≈ 1 gol; sus probabilidades 1X2 coinciden con las de la logística |
+
+Las métricas usadas son **accuracy** (% de aciertos), **log-loss** y **Brier**
+(calidad de las probabilidades, no solo del acierto). El baseline a superar es
+predecir siempre "local" (≈ 48 %). El empate es la clase más difícil de predecir
+(fenómeno conocido del fútbol). Para producción se usa la regresión logística por
+igualar al boosting siendo interpretable y estar bien calibrada.
+
 ## Control de versiones
 
 El proyecto se versiona con Git y GitHub siguiendo este flujo: la rama `main`
 contiene las versiones estables; cada mejora se desarrolla en una rama propia
-(p. ej. `mejoras/auditoria-entrega-1`) con commits pequeños y mensajes
-descriptivos (convención *Conventional Commits*: `feat:`, `fix:`,
-`refactor:`, `docs:`, `chore:`), y se integra a `main` mediante Pull Request.
-Cada entrega se marca con una etiqueta (`entrega-1`).
+con commits pequeños y mensajes descriptivos (convención *Conventional Commits*:
+`feat:`, `fix:`, `refactor:`, `docs:`, `chore:`), y se integra a `main` mediante
+Pull Request.
 
 ## Licencia de los datos
 

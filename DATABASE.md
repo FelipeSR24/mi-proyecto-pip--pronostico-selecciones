@@ -101,8 +101,17 @@ aparecen desde el año 2000 (alcance del proyecto).
 
 ## Salida generada
 
-`output/dataset_final.csv`: dataset transformado, con la variable objetivo y
-las variables de forma reciente, listo para entrenar el modelo de pronóstico
-(ver columnas y diagrama de flujo en `WORKFLOWS.md`). Las figuras del EDA se
-guardan en `output/figuras/`. La carpeta `output/` se genera automáticamente
-al ejecutar `python main.py` y no se versiona (es regenerable).
+`output/dataset_final.csv`: dataset transformado, con la variable objetivo, las
+features predictoras (forma reciente, ELO, head-to-head e importancia) y los
+goles de cada equipo (`home_score`/`away_score`, usados como objetivo del modelo
+Poisson, no como features). Listo para entrenar los modelos (ver columnas y
+diccionario en `README.md` y `WORKFLOWS.md`).
+
+Las figuras del EDA se guardan en `output/figuras/` y las de evaluación de los
+modelos en `output/figuras_modelo/`. La carpeta `output/` se genera
+automáticamente al ejecutar `python main.py` (dataset y EDA) y `python modelo.py`
+(figuras de los modelos), y no se versiona porque es regenerable.
+
+El dataset es la entrada de las etapas siguientes: el modelado (`modelo.py`), la
+lógica de predicción (`prediccion.py`) y la web interactiva (`app.py`). El flujo
+completo está descrito en `WORKFLOWS.md`.

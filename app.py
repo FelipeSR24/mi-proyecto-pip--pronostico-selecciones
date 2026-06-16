@@ -449,6 +449,11 @@ def barra_html(prob: dict, loc: dict, vis: dict) -> str:
     pl, pe, pv = prob["local"] * 100, prob["empate"] * 100, prob["visitante"] * 100
 
     def seg(clase, w):
+        """Crea un segmento de la barra con ancho proporcional al porcentaje w.
+
+        Muestra el numero dentro solo si el segmento es ancho (>=12%); si es muy
+        estrecho, lo deja sin texto para que no se vea apretado.
+        """
         txt = f"{w:.1f}%" if w >= 12 else ""
         return f'<div class="wc-bar__seg {clase}" style="flex:0 0 {w:.2f}%">{txt}</div>'
 
@@ -475,15 +480,21 @@ def figura_matriz(matriz, local_esp: str, visit_esp: str, marcador: tuple):
     Eje X = goles del visitante, eje Y = goles del local; el origen 0-0 queda
     abajo a la izquierda. El marcador mas probable se enmarca en dorado.
     """
-    pct = matriz * 100
-    n = matriz.shape[0]
-    mi, mj = marcador
-    zmax = float(pct.max()) or 1.0
-    ejes = list(range(n))
+    pct = matriz * 100           # pasamos de probabilidad (0-1) a porcentaje
+    n = matriz.shape[0]          # tamano de la matriz (7: marcadores 0 a 6)
+    mi, mj = marcador            # fila/columna del marcador mas probable
+    zmax = float(pct.max()) or 1.0   # mayor probabilidad (para decidir color de texto)
+    ejes = list(range(n))        # valores de los ejes: 0,1,2,...,6
 
+    # Escala de color: de un azul muy claro (poca probabilidad) al azul del
+    # Mundial (mucha). Cada par [posicion, color] marca un punto del degradado.
     escala = [[0.0, "#EEF0FB"], [0.25, "#C2CAEC"],
               [0.55, "#7C8AD4"], [1.0, "#2A398D"]]
 
+    # Heatmap = la cuadricula de colores. z son los valores (las probabilidades),
+    # x/y las posiciones; xgap/ygap dejan un hueco entre celdas; hovertemplate es
+    # el texto que aparece al pasar el cursor (%{y}, %{x}, %{z} son los valores
+    # de esa celda). El <extra></extra> oculta una etiqueta extra de Plotly.
     fig = go.Figure(go.Heatmap(
         z=pct, x=ejes, y=ejes, colorscale=escala, zmin=0, xgap=3, ygap=3,
         hovertemplate=(f"{local_esp} %{{y}} – %{{x}} {visit_esp}"
@@ -492,13 +503,14 @@ def figura_matriz(matriz, local_esp: str, visit_esp: str, marcador: tuple):
                       thickness=14, outlinewidth=0, ticksuffix="%"),
     ))
 
-    # Etiquetas de porcentaje dentro de las celdas (solo >= 1%).
+    # Escribimos el numero (porcentaje) dentro de cada celda, solo si es >= 1%
+    # (las celdas casi imposibles se dejan vacias para no saturar).
     anotaciones = []
     for i in range(n):
         for j in range(n):
             if pct[i, j] >= 1.0:
-                resaltar = (i == mi and j == mj)
-                claro = pct[i, j] > 0.5 * zmax
+                resaltar = (i == mi and j == mj)        # ¿es el marcador top?
+                claro = pct[i, j] > 0.5 * zmax          # ¿fondo oscuro? -> texto blanco
                 anotaciones.append(dict(
                     x=j, y=i, text=f"{pct[i, j]:.0f}", showarrow=False,
                     font=dict(family="Saira Condensed, sans-serif",
@@ -531,6 +543,14 @@ def figura_matriz(matriz, local_esp: str, visit_esp: str, marcador: tuple):
 # INTERFAZ DE LA PAGINA
 # ===========================================================================
 def main():
+    """Dibuja la pagina completa y orquesta el flujo de la web, en este orden:
+
+    1. Configura la pagina e inyecta los estilos (CSS) y la cabecera (hero).
+    2. Carga datos y modelos (una sola vez, en cache) y arma el menu de equipos.
+    3. Recoge lo que elige el usuario (local, visitante, fase, cancha).
+    4. Al pulsar el boton, llama a prediccion.predecir_partido y muestra las tres
+       salidas: marcador mas probable (top-3), matriz interactiva y barra 1X2.
+    """
     st.set_page_config(page_title="Pronóstico · Mundial 2026", page_icon="🏆",
                        layout="centered")
     st.markdown("<style>" + CSS + "</style>", unsafe_allow_html=True)
@@ -548,14 +568,21 @@ def main():
     opciones = [d["raw"] for d in info]
 
     # --- Entradas del usuario ---
+    # st.columns(2) divide la fila en dos columnas (para poner local y visitante
+    # lado a lado). Cada bloque "with cN:" coloca sus elementos en esa columna.
     st.subheader("Configura el partido")
     c1, c2 = st.columns(2)
     with c1:
+        # index = cual sale preseleccionado al abrir (Brasil si esta en la lista).
         idx_l = opciones.index("Brazil") if "Brazil" in opciones else 0
+        # selectbox = menu desplegable. 'opciones' son los nombres internos del
+        # dataset; format_func traduce cada uno al nombre en espanol que ve el
+        # usuario (sin cambiar el valor real que se usa para predecir).
         local_raw = st.selectbox("Selección local", opciones, index=idx_l,
                                  format_func=lambda r: por_raw[r]["esp"])
-        _md(pick_html(por_raw[local_raw], "local"))
+        _md(pick_html(por_raw[local_raw], "local"))   # tarjeta con bandera+nombre
     with c2:
+        # Por defecto el visitante es Argentina (o el segundo de la lista).
         if "Argentina" in opciones:
             idx_v = opciones.index("Argentina")
         else:
@@ -564,8 +591,10 @@ def main():
                                  format_func=lambda r: por_raw[r]["esp"])
         _md(pick_html(por_raw[visit_raw], "visitante"))
 
+    # Segunda fila de controles: fase del torneo y tipo de cancha.
     c3, c4 = st.columns(2)
     with c3:
+        # El 'help' es el texto que aparece al pasar el cursor por el icono "?".
         fase = st.selectbox(
             "Fase del torneo", list(FASES.keys()), index=0,
             help="En el modelo, todos los partidos del Mundial se ponderan con la "
@@ -576,14 +605,16 @@ def main():
             "Cancha neutral", value=True,
             help="En el Mundial 2026 los partidos se juegan en sede neutral. "
                  "Desactívalo solo si la selección local es anfitriona y juega en su país.")
-    importancia = FASES[fase]
+    importancia = FASES[fase]   # la fase elegida -> el numero que entiende el modelo
 
-    # Validacion: no permitir la misma seleccion en ambos lados.
+    # Validacion: no tiene sentido un equipo contra si mismo. st.stop() corta
+    # aqui la ejecucion (no dibuja nada mas hasta que el usuario lo corrija).
     if local_raw == visit_raw:
         _md('<div class="wc-note">Elige dos selecciones distintas para generar el pronóstico.</div>')
         st.stop()
 
-    # Estado inicial (antes de pulsar el boton).
+    # Estado inicial: mientras el usuario NO haya pulsado el boton, mostramos una
+    # nota y paramos. st.button devuelve True solo en el momento del clic.
     if not st.button("Predecir resultado", type="primary"):
         _md('<div class="wc-note">Configura el partido y pulsa '
             '<b>Predecir resultado</b> para ver el marcador más probable, '
@@ -591,6 +622,8 @@ def main():
         st.stop()
 
     # --- Calculo de la prediccion ---
+    # Aqui se llama al "cerebro" (prediccion.py) con lo que eligio el usuario.
+    # Si algun equipo no tuviera datos, se captura el error y se avisa.
     try:
         r = prediccion.predecir_partido(modelos, estado, local_raw, visit_raw,
                                         neutral, importancia)
@@ -598,9 +631,9 @@ def main():
         st.error(f"No se pudo generar el pronóstico: {exc}")
         st.stop()
 
-    prob = r["probabilidades_1x2"]
-    marc = r["marcador"]
-    loc, vis = por_raw[local_raw], por_raw[visit_raw]
+    prob = r["probabilidades_1x2"]    # dict con local/empate/visitante
+    marc = r["marcador"]              # dict con matriz, lambdas y marcador top
+    loc, vis = por_raw[local_raw], por_raw[visit_raw]   # datos de cada equipo
 
     # Franja del partido + contexto.
     _md(banner_html(loc, vis))

@@ -92,23 +92,33 @@ def estado_actual_equipos(dataset: pd.DataFrame) -> dict:
 
     for fila in df.itertuples(index=False):
         local, visit = fila.home_team, fila.away_team
-        gl, gv = int(fila.home_score), int(fila.away_score)
+        gl, gv = int(fila.home_score), int(fila.away_score)   # goles local/visit
 
-        # --- Actualizar ELO con la formula oficial de utils ---
-        r_local, r_visit = ratings[local], ratings[visit]
+        # --- Actualizar ELO con la formula oficial (misma que utils) ---
+        r_local, r_visit = ratings[local], ratings[visit]   # ratings ANTES del partido
+        # Ventaja de local: se suman 100 puntos al local, salvo en cancha neutral.
         bonus = 0.0 if fila.neutral else utils.ELO_VENTAJA_LOCAL
+        # 'esperado' = probabilidad teorica de que gane el local segun la
+        # diferencia de rating (formula logistica del ELO). Da un valor entre 0 y
+        # 1: cuanto mas alto el rating del local frente al rival, mas cerca de 1.
         esperado = 1.0 / (1.0 + 10 ** (-(r_local + bonus - r_visit) / 400))
+        # 'real' = resultado que de verdad paso, en la misma escala: gano (1),
+        # empato (0.5) o perdio (0) el local.
         if gl > gv:
             real = 1.0
         elif gl == gv:
             real = 0.5
         else:
             real = 0.0
+        # K = cuanto puede moverse el rating (mayor en partidos importantes).
         k = utils.ELO_K_POR_IMPORTANCIA.get(fila.importancia, 20.0)
+        # G = factor por margen de goles (ganar por mucho mueve mas el rating).
         g = utils._factor_g(gl - gv)
+        # El cambio es proporcional a la SORPRESA (real - esperado): si el local
+        # gana cuando no se esperaba, sube mucho; si gana lo previsto, sube poco.
         cambio = k * g * (real - esperado)
-        ratings[local] = r_local + cambio
-        ratings[visit] = r_visit - cambio
+        ratings[local] = r_local + cambio   # el local se lleva el cambio
+        ratings[visit] = r_visit - cambio   # el visitante, el opuesto (suma cero)
 
         # --- Actualizar la forma (puntos y goles) de cada equipo ---
         pts_local = 3 if gl > gv else (1 if gl == gv else 0)
@@ -125,6 +135,7 @@ def estado_actual_equipos(dataset: pd.DataFrame) -> dict:
 
     # Construir el resumen final por equipo (promediando sus ultimos N partidos).
     def media_ultimos(lista):
+        """Promedia los ultimos VENTANA_FORMA valores de una lista (0 si vacia)."""
         ultimos = lista[-VENTANA_FORMA:]            # los ultimos N
         return sum(ultimos) / len(ultimos) if ultimos else 0.0
 
