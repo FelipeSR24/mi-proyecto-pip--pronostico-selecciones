@@ -164,7 +164,7 @@ partidos futuros (ver "Prevención de fuga" en `WORKFLOWS.md`).
 | Columna | Qué significa | Cómo se calcula |
 |---|---|---|
 | `neutral` (0/1) | Si se jugó en cancha neutral (sin ventaja de local). | Del dato crudo; booleano → 0/1. |
-| `importancia` (0–3) | Cuánto hay en juego: amistoso=0, clasificatorio=1, competitivo=2, mundial=3. | Mapeo del nombre del torneo (`tournament`) a una escala ordinal. |
+| `importancia` (0–3) | Cuánto hay en juego: amistoso=0, competitivo=1, clasificatorio=2, mundial=3. | Mapeo del nombre del torneo (`tournament`) a una escala ordinal. |
 
 ### Forma reciente
 
