@@ -3,8 +3,8 @@
 app.py  —  PAGINA WEB INTERACTIVA (Streamlit) · MUNDIAL FIFA 2026
 ============================================================================
 Es la "cara" del proyecto: la pagina con la que interactua el usuario. Permite
-elegir la seleccion local, la visitante, la fase del torneo y si la cancha es
-neutral, y muestra las TRES salidas del modelo en el orden:
+elegir la seleccion local, la visitante y si la cancha es neutral, y muestra
+las TRES salidas del modelo en el orden:
 
   1. Marcador mas probable      -> ranking de los 3 marcadores mas probables.
   2. Matriz de marcadores        -> mapa de calor interactivo (Plotly).
@@ -17,8 +17,8 @@ el resultado. Asi la interfaz y los calculos quedan separados y ordenados.
 RESTRICCIONES DE DOMINIO (Mundial 2026)
 ---------------------------------------
 - Solo se pueden elegir las 48 selecciones clasificadas al Mundial 2026.
-- La "importancia" se sustituye por las fases reales del torneo, todas con el
-  mismo peso competitivo (IMPORTANCIA_MUNDIAL) en el modelo.
+- La "importancia" es fija (un partido de Mundial): no se pide al usuario
+  porque todas las fases tendrian el mismo peso en el modelo.
 
 COMO EJECUTARLA (en tu maquina, con el entorno activado):
     streamlit run app.py
@@ -117,16 +117,11 @@ ALIAS = {
     "Bosnia-Herzegovina": "Bosnia and Herzegovina",
 }
 
-# Fases del Mundial 2026. Todas comparten el mismo peso competitivo en el modelo
-# (un partido de Copa del Mundo); la fase aporta contexto a la presentacion.
-FASES = {
-    "Fase de grupos":          prediccion.utils.IMPORTANCIA_MUNDIAL,
-    "Dieciseisavos de final":  prediccion.utils.IMPORTANCIA_MUNDIAL,
-    "Octavos de final":        prediccion.utils.IMPORTANCIA_MUNDIAL,
-    "Cuartos de final":        prediccion.utils.IMPORTANCIA_MUNDIAL,
-    "Semifinal":               prediccion.utils.IMPORTANCIA_MUNDIAL,
-    "Final":                   prediccion.utils.IMPORTANCIA_MUNDIAL,
-}
+# En el Mundial 2026 todos los partidos tienen el mismo peso competitivo para el
+# modelo (un partido de Copa del Mundo), asi que la importancia es fija. No se
+# pide al usuario elegir "fase" porque no cambiaria el calculo: el modelo
+# recibiria el mismo valor en todos los casos.
+IMPORTANCIA_PARTIDO = prediccion.utils.IMPORTANCIA_MUNDIAL
 
 
 def _canonico(nombre: str) -> str:
@@ -199,7 +194,7 @@ CSS = """
 
 .stApp{ background:var(--papel); }
 html, body, [class*="css"]{ font-family:'Inter',system-ui,sans-serif; }
-.block-container{ padding-top:1.1rem; padding-bottom:3rem; max-width:880px; }
+.block-container{ padding-top:3.2rem; padding-bottom:3rem; max-width:880px; }
 h1,h2,h3,h4{ font-family:'Saira Condensed',sans-serif; letter-spacing:.2px; color:var(--tinta); }
 
 /* Boton primario */
@@ -327,6 +322,19 @@ h1,h2,h3,h4{ font-family:'Saira Condensed',sans-serif; letter-spacing:.2px; colo
 /* ====== Nota / aviso ====== */
 .wc-note{ background:#EEF1FB; border-left:4px solid var(--azul); border-radius:10px;
   padding:12px 16px; font-size:.88rem; color:#34406B; margin:.4rem 0 0; line-height:1.5; }
+
+/* ====== Encabezado de seccion (Configura el partido / Resultados) ====== */
+.wc-results-head{ display:flex; align-items:center; gap:14px; margin:1.8rem 0 .9rem; }
+.wc-results-head__txt{ font-family:'Saira Condensed',sans-serif; font-weight:800; font-size:1.7rem;
+  text-transform:uppercase; color:var(--tinta); line-height:1; white-space:nowrap; }
+.wc-results-head__rule{ flex:1; height:4px; border-radius:4px;
+  background:linear-gradient(90deg,var(--azul),var(--verde),var(--rojo)); }
+
+/* ====== Recuadro nativo de st.container(border=True) ====== */
+/* Engloba tanto la configuracion como los resultados; lo alineamos a la
+   identidad visual (fondo blanco, esquinas redondeadas y sombra suave). */
+div[data-testid="stVerticalBlockBorderWrapper"]{ background:var(--nube);
+  border-radius:20px !important; box-shadow:0 10px 30px rgba(14,20,48,.07); }
 
 /* ====== Responsive (movil) ====== */
 @media (max-width:640px){
@@ -547,7 +555,7 @@ def main():
 
     1. Configura la pagina e inyecta los estilos (CSS) y la cabecera (hero).
     2. Carga datos y modelos (una sola vez, en cache) y arma el menu de equipos.
-    3. Recoge lo que elige el usuario (local, visitante, fase, cancha).
+    3. Recoge lo que elige el usuario (local, visitante y tipo de cancha).
     4. Al pulsar el boton, llama a prediccion.predecir_partido y muestra las tres
        salidas: marcador mas probable (top-3), matriz interactiva y barra 1X2.
     """
@@ -568,44 +576,44 @@ def main():
     opciones = [d["raw"] for d in info]
 
     # --- Entradas del usuario ---
-    # st.columns(2) divide la fila en dos columnas (para poner local y visitante
-    # lado a lado). Cada bloque "with cN:" coloca sus elementos en esa columna.
-    st.subheader("Configura el partido")
-    c1, c2 = st.columns(2)
-    with c1:
-        # index = cual sale preseleccionado al abrir (Brasil si esta en la lista).
-        idx_l = opciones.index("Brazil") if "Brazil" in opciones else 0
-        # selectbox = menu desplegable. 'opciones' son los nombres internos del
-        # dataset; format_func traduce cada uno al nombre en espanol que ve el
-        # usuario (sin cambiar el valor real que se usa para predecir).
-        local_raw = st.selectbox("Selección local", opciones, index=idx_l,
-                                 format_func=lambda r: por_raw[r]["esp"])
-        _md(pick_html(por_raw[local_raw], "local"))   # tarjeta con bandera+nombre
-    with c2:
-        # Por defecto el visitante es Argentina (o el segundo de la lista).
-        if "Argentina" in opciones:
-            idx_v = opciones.index("Argentina")
-        else:
-            idx_v = 1 if len(opciones) > 1 else 0
-        visit_raw = st.selectbox("Selección visitante", opciones, index=idx_v,
-                                 format_func=lambda r: por_raw[r]["esp"])
-        _md(pick_html(por_raw[visit_raw], "visitante"))
+    # Encabezado de la seccion de configuracion (mismo estilo que el de
+    # resultados, para que se vean como dos bloques hermanos).
+    _md('<div class="wc-results-head">'
+        '<div class="wc-results-head__txt">Configura el partido</div>'
+        '<div class="wc-results-head__rule"></div></div>')
 
-    # Segunda fila de controles: fase del torneo y tipo de cancha.
-    c3, c4 = st.columns(2)
-    with c3:
-        # El 'help' es el texto que aparece al pasar el cursor por el icono "?".
-        fase = st.selectbox(
-            "Fase del torneo", list(FASES.keys()), index=0,
-            help="En el modelo, todos los partidos del Mundial se ponderan con la "
-                 "misma importancia competitiva. En fases de eliminación, un empate "
-                 "se definiría en prórroga o penales.")
-    with c4:
+    # st.container(border=True) crea un recuadro nativo que ENGLOBA los menus y
+    # el check (a diferencia del HTML inyectado, este si puede contener widgets).
+    with st.container(border=True):
+        # st.columns(2) divide la fila en dos columnas (local y visitante al lado).
+        c1, c2 = st.columns(2)
+        with c1:
+            # index = cual sale preseleccionado al abrir (Brasil si esta).
+            idx_l = opciones.index("Brazil") if "Brazil" in opciones else 0
+            # selectbox = menu desplegable. 'opciones' son los nombres internos
+            # del dataset; format_func los traduce al espanol que ve el usuario
+            # (sin cambiar el valor real que se usa para predecir).
+            local_raw = st.selectbox("Selección local", opciones, index=idx_l,
+                                     format_func=lambda r: por_raw[r]["esp"])
+            _md(pick_html(por_raw[local_raw], "local"))   # bandera+nombre
+        with c2:
+            # Por defecto el visitante es Argentina (o el segundo de la lista).
+            if "Argentina" in opciones:
+                idx_v = opciones.index("Argentina")
+            else:
+                idx_v = 1 if len(opciones) > 1 else 0
+            visit_raw = st.selectbox("Selección visitante", opciones, index=idx_v,
+                                     format_func=lambda r: por_raw[r]["esp"])
+            _md(pick_html(por_raw[visit_raw], "visitante"))
+
+        # Tipo de cancha (la importancia es fija para el Mundial, no se pregunta).
+        # El espaciador separa el check de las tarjetas de equipo de arriba.
+        _md('<div style="height:22px"></div>')
         neutral = st.checkbox(
-            "Cancha neutral", value=True,
+            "Cancha neutral (sede compartida, sin localía real)", value=True,
             help="En el Mundial 2026 los partidos se juegan en sede neutral. "
                  "Desactívalo solo si la selección local es anfitriona y juega en su país.")
-    importancia = FASES[fase]   # la fase elegida -> el numero que entiende el modelo
+    importancia = IMPORTANCIA_PARTIDO   # valor fijo de partido de Mundial
 
     # Validacion: no tiene sentido un equipo contra si mismo. st.stop() corta
     # aqui la ejecucion (no dibuja nada mas hasta que el usuario lo corrija).
@@ -635,35 +643,44 @@ def main():
     marc = r["marcador"]              # dict con matriz, lambdas y marcador top
     loc, vis = por_raw[local_raw], por_raw[visit_raw]   # datos de cada equipo
 
-    # Franja del partido + contexto.
-    _md(banner_html(loc, vis))
-    sede = "Cancha neutral" if neutral else f"Localía de {loc['esp']}"
-    _md(f'<div class="wc-meta">Mundial 2026 &nbsp;·&nbsp; <b>{fase}</b> '
-        f'&nbsp;·&nbsp; {sede}</div>')
+    # ===================== SECCION DE RESULTADOS =====================
+    # Encabezado que separa visualmente "lo que configuro el usuario" de "los
+    # resultados del modelo".
+    _md('<div class="wc-results-head">'
+        '<div class="wc-results-head__txt">Resultados de la predicción</div>'
+        '<div class="wc-results-head__rule"></div></div>')
 
-    # --- SECCION 1: marcador mas probable (ranking top-3) ---
-    _md(eyebrow_html(1, "Marcador más probable"))
-    top3 = top3_marcadores(marc["matriz"])
-    _md(podium_html(top3, loc, vis))
-    _md(f'<div class="wc-meta" style="text-align:left;margin-top:16px">'
-        f'Goles esperados (promedio del modelo): '
-        f'<b>{loc["esp"]} {marc["lambda_local"]:.2f}</b> · '
-        f'<b>{vis["esp"]} {marc["lambda_visit"]:.2f}</b></div>')
+    # st.container(border=True) engloba TODAS las salidas en un solo recuadro
+    # nativo (puede contener el grafico Plotly, a diferencia de un div HTML).
+    with st.container(border=True):
+        # Franja del partido + contexto (sin la fase, que ya no se selecciona).
+        _md(banner_html(loc, vis))
+        sede = "Cancha neutral" if neutral else f"Localía de {loc['esp']}"
+        _md(f'<div class="wc-meta">Mundial 2026 &nbsp;·&nbsp; {sede}</div>')
 
-    # --- SECCION 2: matriz de marcadores (interactiva) ---
-    _md(eyebrow_html(2, "Matriz de marcadores"))
-    st.caption("Probabilidad de cada marcador exacto. Pasa el cursor para ver el "
-               "detalle y usa la rueda del ratón para acercarte. El recuadro dorado "
-               "señala el marcador más probable.")
-    fig = figura_matriz(marc["matriz"], loc["esp"], vis["esp"],
-                        marc["marcador_probable"])
-    st.plotly_chart(fig, use_container_width=True, theme=None,
-                    config={"displaylogo": False, "scrollZoom": True,
-                            "modeBarButtonsToRemove": ["select2d", "lasso2d"]})
+        # --- SECCION 1: marcador mas probable (ranking top-3) ---
+        _md(eyebrow_html(1, "Marcador más probable"))
+        top3 = top3_marcadores(marc["matriz"])
+        _md(podium_html(top3, loc, vis))
+        _md(f'<div class="wc-meta" style="text-align:left;margin-top:16px">'
+            f'Goles esperados (promedio del modelo): '
+            f'<b>{loc["esp"]} {marc["lambda_local"]:.2f}</b> · '
+            f'<b>{vis["esp"]} {marc["lambda_visit"]:.2f}</b></div>')
 
-    # --- SECCION 3: probabilidades del resultado (barra segmentada) ---
-    _md(eyebrow_html(3, "Probabilidades del resultado"))
-    _md(barra_html(prob, loc, vis))
+        # --- SECCION 2: matriz de marcadores (interactiva) ---
+        _md(eyebrow_html(2, "Matriz de marcadores"))
+        st.caption("Probabilidad de cada marcador exacto. Pasa el cursor para ver "
+                   "el detalle y usa la rueda del ratón para acercarte. El recuadro "
+                   "dorado señala el marcador más probable.")
+        fig = figura_matriz(marc["matriz"], loc["esp"], vis["esp"],
+                            marc["marcador_probable"])
+        st.plotly_chart(fig, use_container_width=True, theme=None,
+                        config={"displaylogo": False, "scrollZoom": True,
+                                "modeBarButtonsToRemove": ["select2d", "lasso2d"]})
+
+        # --- SECCION 3: probabilidades del resultado (barra segmentada) ---
+        _md(eyebrow_html(3, "Probabilidades del resultado"))
+        _md(barra_html(prob, loc, vis))
 
     # Aviso honesto sobre el alcance.
     _md('<div class="wc-note" style="margin-top:2rem">Las cifras son estimaciones '

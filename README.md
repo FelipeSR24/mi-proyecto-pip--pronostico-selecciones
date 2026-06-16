@@ -15,8 +15,8 @@ evaluación, hasta un producto final navegable.
 
 ## Las tres salidas del producto
 
-Para un partido elegido por el usuario (local, visitante, fase y tipo de cancha),
-la web entrega:
+Para un partido elegido por el usuario (local, visitante y tipo de cancha), la
+web entrega:
 
 1. **Probabilidades del resultado** — gana local / empate / gana visitante.
 2. **Matriz de marcadores** — la probabilidad de cada marcador posible.
@@ -123,9 +123,9 @@ Al trabajar en local existen además dos carpetas que **no se versionan**
    streamlit run app.py
    ```
 
-   Se abre sola en el navegador. Elige las dos selecciones, la fase y el tipo de
-   cancha, y pulsa "Predecir" para ver las tres salidas. (La web entrena los
-   modelos al arrancar, así que la primera carga tarda unos segundos.)
+   Se abre sola en el navegador. Elige las dos selecciones y el tipo de cancha,
+   y pulsa "Predecir" para ver las tres salidas. (La web entrena los modelos al
+   arrancar, así que la primera carga tarda unos segundos.)
 
 ## Configuración
 
@@ -164,7 +164,7 @@ partidos futuros (ver "Prevención de fuga" en `WORKFLOWS.md`).
 | Columna | Qué significa | Cómo se calcula |
 |---|---|---|
 | `neutral` (0/1) | Si se jugó en cancha neutral (sin ventaja de local). | Del dato crudo; booleano → 0/1. |
-| `importancia` (0–3) | Cuánto hay en juego: amistoso=0, competitivo=1, clasificatorio=2, mundial=3. | Mapeo del nombre del torneo (`tournament`) a una escala ordinal. |
+| `importancia` (0–3) | Cuánto hay en juego: amistoso=0, clasificatorio=1, competitivo=2, mundial=3. | Mapeo del nombre del torneo (`tournament`) a una escala ordinal. |
 
 ### Forma reciente
 

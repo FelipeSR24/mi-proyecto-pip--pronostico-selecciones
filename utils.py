@@ -405,8 +405,8 @@ def construir_features(results: pd.DataFrame, ventana: int = 5) -> pd.DataFrame:
 # torneo en que se juega), conocido ANTES del pitido inicial, asi que NO mete
 # fuga de informacion. A mayor numero, mas hay en juego.
 IMPORTANCIA_AMISTOSO = 0        # amistosos (sin nada en juego)
-IMPORTANCIA_COMPETITIVO = 1  # eliminatorias / clasificatorios
-IMPORTANCIA_CLASIFICATORIO = 2     # otros torneos oficiales (continentales, etc.)
+IMPORTANCIA_CLASIFICATORIO = 1  # eliminatorias / clasificatorios
+IMPORTANCIA_COMPETITIVO = 2     # otros torneos oficiales (continentales, etc.)
 IMPORTANCIA_MUNDIAL = 3         # fase final de la Copa del Mundo
 
 
